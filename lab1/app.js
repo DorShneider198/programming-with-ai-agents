@@ -26,6 +26,8 @@ const ui = {
   micWarning: $("mic-warning"),
   latency: $("latency"),
   calibrate: $("calibrate"),
+  accuracy: $("accuracy"),
+  testAccuracy: $("test-accuracy"),
   start: $("start"),
   pause: $("pause"),
   reset: $("reset"),
@@ -177,6 +179,10 @@ function scheduler() {
       if (beat >= CAL_CLICKS) return;
       onsetNode.port.postMessage({ click: nextClickTime });
     }
+    if (testing) {
+      if (beat >= TEST_HITS + TEST_LEAD_IN) return;
+      if (beat >= TEST_LEAD_IN) planTestHit(nextClickTime);
+    }
     playClick(nextClickTime, beat % 4 === 0);
     clickTimes.push(nextClickTime);
     if (clickTimes.length > 1000) clickTimes.shift();
@@ -235,6 +241,7 @@ async function calibrate() {
   calResults = [];
   ui.calibrate.disabled = true;
   ui.start.disabled = true;
+  ui.testAccuracy.disabled = true;
   ui.status.textContent = "Calibrating: stay quiet for about 9 seconds…";
   onsetNode.port.postMessage({ calibrating: true });
   startMetronome(60);
@@ -253,6 +260,7 @@ function finishCalibration() {
     ui.status.textContent =
       `The mic heard only ${heard.length} of ${CAL_CLICKS} clicks. Turn the volume up and calibrate again.`;
     ui.start.disabled = latency === null;
+    ui.testAccuracy.disabled = latency === null;
     return;
   }
 
@@ -268,6 +276,9 @@ function finishCalibration() {
 
   ui.latency.textContent = `${Math.round(latency * 1000)} ms speaker → mic (varied by ${spreadMs.toFixed(1)} ms)`;
   ui.start.disabled = false;
+  ui.testAccuracy.disabled = false;
+  appError = null;
+  ui.accuracy.textContent = "Not tested yet";
   ui.status.textContent =
     floor > 0.4
       ? "Calibrated, but the click is very loud in the mic, so only hard hits will count. Turn the volume down a little and calibrate again."
@@ -276,10 +287,118 @@ function finishCalibration() {
 
 function invalidateCalibration() {
   latency = null;
+  appError = null;
   pause();
   ui.start.disabled = true;
+  ui.testAccuracy.disabled = true;
   ui.threshold.min = 0.01;
   ui.latency.textContent = "Not calibrated yet";
+  ui.accuracy.textContent = "Not tested (calibrate first)";
+}
+
+// ---------- Accuracy test ----------
+// Plays synthetic drum hits through the speakers at exactly known offsets from
+// the clicks, at varying loudness, and runs them through the same detection and
+// scoring as real hits. Measured minus true offset is the app's own error, so
+// its spread is how much the app adds to a player's spread.
+
+const TEST_HITS = 40;
+const TEST_BPM = 100;
+const TEST_LEAD_IN = 2;        // clicks before the first test hit
+const TEST_MAX_OFFSET = 0.04;  // true offsets are random within ±40 ms
+
+let testing = null;  // { planned: Map(click time → true offset ms), scored: Set, errors: [], extra: 0 }
+let appError = null; // ms, spread of the app's own error from the last test
+let noiseBuffer = null;
+
+// A low "thump": a short noise burst plus a 200 Hz body, which lands in the hit
+// band like a real drum.
+function playTestHit(time, level) {
+  if (!noiseBuffer) {
+    noiseBuffer = ctx.createBuffer(1, Math.round(ctx.sampleRate * 0.02), ctx.sampleRate);
+    const d = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.004));
+  }
+  const noise = ctx.createBufferSource();
+  noise.buffer = noiseBuffer;
+  const lowpass = ctx.createBiquadFilter();
+  lowpass.frequency.value = 500;
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.value = level;
+  noise.connect(lowpass).connect(noiseGain).connect(ctx.destination);
+  noise.start(time);
+
+  const body = ctx.createOscillator();
+  const bodyGain = ctx.createGain();
+  body.frequency.value = 200;
+  bodyGain.gain.setValueAtTime(0, time);
+  bodyGain.gain.linearRampToValueAtTime(level, time + 0.001);
+  bodyGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+  body.connect(bodyGain).connect(ctx.destination);
+  body.start(time);
+  body.stop(time + 0.09);
+}
+
+function planTestHit(clickTime) {
+  const offset = (Math.random() * 2 - 1) * TEST_MAX_OFFSET;
+  const level = 0.5 + Math.random() * 0.5; // vary loudness like real hits
+  playTestHit(clickTime + offset, level);
+  testing.planned.set(clickTime, offset * 1000);
+}
+
+function runAccuracyTest() {
+  if (latency === null || running) return;
+  testing = { planned: new Map(), scored: new Set(), errors: [], extra: 0 };
+  ui.testAccuracy.disabled = true;
+  ui.calibrate.disabled = true;
+  ui.start.disabled = true;
+  const seconds = (TEST_HITS + TEST_LEAD_IN) * (60 / TEST_BPM) + 1.2;
+  ui.status.textContent = `Testing accuracy: stay quiet for about ${Math.round(seconds)} seconds…`;
+  startMetronome(TEST_BPM);
+  setTimeout(finishAccuracyTest, seconds * 1000);
+}
+
+function scoreTestHit(t) {
+  const click = nearestClick(t);
+  const trueOffset = testing.planned.get(click);
+  if (trueOffset === undefined || testing.scored.has(click)) {
+    testing.extra++;
+    return;
+  }
+  testing.scored.add(click);
+  testing.errors.push((t - click) * 1000 - trueOffset);
+}
+
+function finishAccuracyTest() {
+  stopMetronome();
+  const result = testing;
+  testing = null;
+  ui.calibrate.disabled = false;
+  ui.start.disabled = latency === null;
+  ui.testAccuracy.disabled = latency === null;
+
+  const n = result.errors.length;
+  if (n < TEST_HITS * 0.8) {
+    appError = null;
+    ui.accuracy.textContent = "Test failed";
+    ui.status.textContent =
+      `The mic picked up only ${n} of ${TEST_HITS} test hits. Move the sensitivity slider left, ` +
+      `or turn the volume up and calibrate again, then retest.`;
+    window.lastAccuracyTest = { ok: false, found: n, extra: result.extra };
+    return;
+  }
+  const bias = mean(result.errors);
+  appError = stdDev(result.errors);
+  const worst = Math.max(...result.errors.map((e) => Math.abs(e - bias)));
+  const extra = result.extra ? `, ${result.extra} false` : "";
+  ui.accuracy.textContent = `±${appError.toFixed(1)} ms app error (${n}/${TEST_HITS} test hits found${extra})`;
+  ui.status.textContent =
+    `Accuracy test done. The app's own timing error is ±${appError.toFixed(1)} ms ` +
+    `(worst single hit ${worst.toFixed(1)} ms off; average shift ${fmt(bias)}).`;
+  window.lastAccuracyTest = {
+    ok: true, found: n, extra: result.extra, errorSd: appError, bias, worst,
+    threshold: Number(ui.threshold.value), latencyMs: latency * 1000,
+  };
 }
 
 // ---------- Hits ----------
@@ -292,6 +411,7 @@ function handleHit(time) {
   if (!running || calibrating || latency === null || clickTimes.length === 0) return;
 
   const t = time - latency;
+  if (testing) return scoreTestHit(t);
   const click = nearestClick(t);
   const offset = (t - click) * 1000;
   // Score only sounds close to a click, and at most one per click, so a
@@ -315,6 +435,17 @@ function mean(xs) {
 function stdDev(xs) {
   const m = mean(xs);
   return Math.sqrt(xs.reduce((a, x) => a + (x - m) ** 2, 0) / xs.length);
+}
+
+// Spread estimate that ignores outliers: median absolute deviation, scaled to
+// match the standard deviation when there are no outliers.
+function robustSpread(xs) {
+  const median = (a) => {
+    const s = [...a].sort((p, q) => p - q);
+    return s[Math.floor(s.length / 2)];
+  };
+  const mid = median(xs);
+  return 1.4826 * median(xs.map((x) => Math.abs(x - mid)));
 }
 
 function fmt(ms) {
@@ -408,6 +539,7 @@ function endSession() {
   ui.start.disabled = latency === null;
   ui.pause.disabled = true;
   ui.calibrate.disabled = false;
+  ui.testAccuracy.disabled = latency === null;
   setSessionControlsDisabled(false);
   ui.status.textContent = "Session finished.";
   showSummary();
@@ -424,6 +556,7 @@ function resetSession() {
   ui.start.disabled = latency === null;
   ui.pause.disabled = true;
   ui.calibrate.disabled = false;
+  ui.testAccuracy.disabled = latency === null;
   setSessionControlsDisabled(false);
   ui.status.textContent = "";
 }
@@ -550,7 +683,15 @@ function summaryDetails(n, sd) {
     parts.push(
       `<p><strong>What the number means:</strong> the standard deviation of your hits' offsets from the click. ` +
         `About two out of three hits land within this range of your average timing. ` +
-        `It is ${((sd / beatMs) * 100).toFixed(1)}% of the beat.</p>`
+        `It is ${((sd / beatMs) * 100).toFixed(1)}% of the beat.</p>`,
+      `<p><strong>Without stray hits:</strong> ±${Math.round(robustSpread(offsets))} ms. This estimate ignores ` +
+        `outliers; if it is much lower than ±${Math.round(sd)} ms, a few stray sounds or badly mistimed hits ` +
+        `are inflating the main number.</p>`,
+      appError === null
+        ? `<p><strong>App's own error:</strong> not measured yet. Run the accuracy test (next to Calibrate) ` +
+            `to see how much of your spread comes from the app.</p>`
+        : `<p><strong>App's own error</strong> (accuracy test): ±${appError.toFixed(1)} ms. ` +
+            `Your spread with it removed: ±${Math.round(Math.sqrt(Math.max(0, sd * sd - appError * appError)))} ms.</p>`
     );
   }
   parts.push(
@@ -703,6 +844,7 @@ async function start() {
   ui.start.disabled = true;
   ui.pause.disabled = false;
   ui.calibrate.disabled = true;
+  ui.testAccuracy.disabled = true;
   ui.status.textContent = "Listening…";
 }
 
@@ -715,6 +857,7 @@ function pause() {
   ui.start.textContent = "Resume";
   ui.pause.disabled = true;
   ui.calibrate.disabled = false;
+  ui.testAccuracy.disabled = latency === null;
   ui.status.textContent = "Paused.";
 }
 
@@ -729,6 +872,7 @@ ui.mic.addEventListener("change", async () => {
   }
 });
 ui.calibrate.addEventListener("click", calibrate);
+ui.testAccuracy.addEventListener("click", runAccuracyTest);
 ui.start.addEventListener("click", start);
 ui.pause.addEventListener("click", pause);
 ui.reset.addEventListener("click", resetSession);
