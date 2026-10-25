@@ -141,6 +141,26 @@ button:disabled { opacity: 0.5; cursor: default; }
 .stats span { font-size: 0.85rem; }
 .stats strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
 
+.countdown {
+  margin-left: auto;
+  font-size: 1.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.summary h2 { margin: 0 0 4px; font-size: 1.3rem; }
+.summary h3 { margin: 20px 0 8px; font-size: 1.05rem; }
+.summary .note { color: var(--text-muted); font-size: 0.9rem; margin: 12px 0; }
+.reference {
+  border-left: 3px solid var(--series);
+  padding: 4px 0 4px 12px;
+  margin-bottom: 12px;
+}
+.reference p { margin: 4px 0; }
+.reference .verdict { font-weight: 600; }
+.reference .source { font-size: 0.85rem; color: var(--text-muted); }
+.reference .source a { color: inherit; }
+
 .chart-wrap { position: relative; }
 #chart { display: block; width: 100%; height: 260px; }
 

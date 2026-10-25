@@ -19,6 +19,19 @@
       </div>
 
       <div class="row">
+        <label for="session-length">Session</label>
+        <select id="session-length">
+          <option value="30">30 seconds</option>
+          <option value="60" selected>60 seconds</option>
+          <option value="120">120 seconds</option>
+          <option value="custom">Custom…</option>
+        </select>
+        <span id="custom-wrap" hidden>
+          <input id="session-custom" type="number" min="5" max="600" value="90" aria-label="Custom session length in seconds"> <span>seconds</span>
+        </span>
+      </div>
+
+      <div class="row">
         <label for="threshold">Sensitivity</label>
         <input id="threshold" type="range" min="0.01" max="0.8" step="0.01" value="0.2">
         <span id="threshold-value">0.20</span>
@@ -42,15 +55,42 @@
       <div class="row buttons">
         <button id="start" type="button" class="primary">Start</button>
         <button id="pause" type="button" disabled>Pause</button>
-        <button id="reset" type="button">Clear results</button>
+        <button id="reset" type="button">Reset</button>
       </div>
       <p id="status" class="status" role="status"></p>
+    </section>
+
+    <section id="summary" class="panel summary" hidden>
+      <h2>Session summary</h2>
+      <p id="summary-meta" class="muted"></p>
+      <div class="stats">
+        <div><span class="muted">Hits</span><strong id="sum-count"></strong></div>
+        <div><span class="muted">Average offset</span><strong id="sum-mean"></strong></div>
+        <div><span class="muted">Consistency (std. dev.)</span><strong id="sum-sd"></strong></div>
+      </div>
+
+      <h3>Compared with published research</h3>
+      <div id="sum-compare"></div>
+
+      <p class="note">
+        <strong>Measurement error:</strong> this app times your hits with a laptop speaker and its
+        built-in mic, which add timing error of their own. Differences of a few milliseconds
+        between you and a reference level are not meaningful. The study used a dedicated
+        microphone on each drum.
+      </p>
+      <p class="note">
+        <strong>Levels not shown:</strong> non-musician, amateur and experienced (non-professional)
+        drummer levels are left out. No published values of this measure for those groups could
+        be verified.
+      </p>
+      <button id="new-session" type="button" class="primary">New session</button>
     </section>
 
     <section class="panel">
       <div class="last-hit">
         <span id="last-offset">–</span>
         <span id="last-label" class="muted"></span>
+        <span id="countdown" class="countdown" aria-live="off"></span>
       </div>
 
       <div class="stats">

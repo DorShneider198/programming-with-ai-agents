@@ -9,6 +9,17 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   bpm: $("bpm"),
   bpmRange: $("bpm-range"),
+  sessionLength: $("session-length"),
+  sessionCustom: $("session-custom"),
+  customWrap: $("custom-wrap"),
+  countdown: $("countdown"),
+  summary: $("summary"),
+  summaryMeta: $("summary-meta"),
+  sumCount: $("sum-count"),
+  sumMean: $("sum-mean"),
+  sumSd: $("sum-sd"),
+  sumCompare: $("sum-compare"),
+  newSession: $("new-session"),
   threshold: $("threshold"),
   thresholdValue: $("threshold-value"),
   meterFill: $("meter-fill"),
@@ -345,6 +356,162 @@ function render() {
   drawChart();
 }
 
+function clearResults() {
+  offsets = [];
+  ignored = 0;
+  lastScoredClick = null;
+  render();
+}
+
+// ---------- Timed session ----------
+
+let paused = false;    // a session is in progress but paused
+let sessionLength = 0; // seconds
+let remainingMs = 0;
+let countdownTimer = null;
+let lastTick = 0;
+
+function chosenSessionLength() {
+  if (ui.sessionLength.value !== "custom") return Number(ui.sessionLength.value);
+  return Math.min(600, Math.max(5, Math.round(Number(ui.sessionCustom.value) || 60)));
+}
+
+function showCountdown() {
+  const s = Math.ceil(remainingMs / 1000);
+  ui.countdown.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+function startCountdown() {
+  lastTick = performance.now();
+  showCountdown();
+  countdownTimer = setInterval(() => {
+    const now = performance.now();
+    remainingMs = Math.max(0, remainingMs - (now - lastTick));
+    lastTick = now;
+    showCountdown();
+    if (remainingMs === 0) endSession();
+  }, 100);
+}
+
+function stopCountdown() {
+  clearInterval(countdownTimer);
+}
+
+// Tempo and length stay fixed for the whole session, so the summary describes one setting.
+function setSessionControlsDisabled(disabled) {
+  for (const el of [ui.bpm, ui.bpmRange, ui.sessionLength, ui.sessionCustom]) el.disabled = disabled;
+}
+
+function endSession() {
+  stopMetronome();
+  stopCountdown();
+  paused = false;
+  ui.start.textContent = "Start";
+  ui.start.disabled = latency === null;
+  ui.pause.disabled = true;
+  ui.calibrate.disabled = false;
+  setSessionControlsDisabled(false);
+  ui.status.textContent = "Session finished.";
+  showSummary();
+}
+
+function resetSession() {
+  stopMetronome();
+  stopCountdown();
+  paused = false;
+  clearResults();
+  ui.countdown.textContent = "";
+  ui.summary.hidden = true;
+  ui.start.textContent = "Start";
+  ui.start.disabled = latency === null;
+  ui.pause.disabled = true;
+  ui.calibrate.disabled = false;
+  setSessionControlsDisabled(false);
+  ui.status.textContent = "";
+}
+
+// ---------- Session summary ----------
+// Reference levels from published research, compared on consistency (the SD of
+// each hit's offset from the click). Only levels with verified published values
+// of this same measure are listed; others are left out rather than estimated.
+
+const REFERENCES = [
+  {
+    level: "Professional drummers",
+    // Fujii et al. (2011), p. 500: the SD of synchronization error as a percentage
+    // of the beat interval "was around 2% in the 60 and 120 bpm conditions,
+    // whereas it was around 4% at the 200 bpm tempo".
+    pctAtTempo: { 60: 2, 120: 2, 200: 4 },
+    who:
+      "15 professional drummers (26.5 years of experience on average) playing a basic beat " +
+      "on a drum kit, with the metronome in headphones, for 60 seconds per tempo.",
+    measure:
+      "Standard deviation of each hit's offset from the click, as a percentage of the beat " +
+      "interval. This is the same measure as the consistency shown here.",
+    citation:
+      "Fujii, S., Hirashima, M., Kudo, K., Ohtsuki, T., Nakamura, Y., & Oda, S. (2011). " +
+      "Synchronization error of drum kit playing with a metronome at different tempi by " +
+      "professional drummers. Music Perception, 28(5), 491–503.",
+    url: "https://doi.org/10.1525/mp.2011.28.5.491",
+  },
+];
+
+const MIN_HITS_FOR_COMPARISON = 10;
+
+function showSummary() {
+  const n = offsets.length;
+  const beatMs = 60000 / bpm;
+  const extra = ignored ? ` · ${ignored} extra sound${ignored === 1 ? "" : "s"} ignored` : "";
+  ui.summaryMeta.textContent = `${sessionLength} seconds at ${bpm} BPM${extra}`;
+  ui.sumCount.textContent = n;
+  ui.sumMean.textContent = n ? `${fmt(mean(offsets))} (${describe(mean(offsets))})` : "–";
+  ui.sumCompare.innerHTML = "";
+
+  if (n < 2) {
+    ui.sumSd.textContent = "–";
+  } else {
+    const sd = stdDev(offsets);
+    const pct = (sd / beatMs) * 100;
+    ui.sumSd.textContent = `±${Math.round(sd)} ms (${pct.toFixed(1)}% of the beat)`;
+    if (n >= MIN_HITS_FOR_COMPARISON) {
+      for (const ref of REFERENCES) ui.sumCompare.append(compareWith(ref, pct, beatMs));
+    }
+  }
+  if (n < MIN_HITS_FOR_COMPARISON) {
+    const p = document.createElement("p");
+    p.textContent = `Too few hits for a meaningful comparison (need at least ${MIN_HITS_FOR_COMPARISON}).`;
+    ui.sumCompare.append(p);
+  }
+
+  ui.summary.hidden = false;
+  ui.summary.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function compareWith(ref, pct, beatMs) {
+  const tested = Object.keys(ref.pctAtTempo).map(Number);
+  const nearest = tested.reduce((a, b) => (Math.abs(b - bpm) < Math.abs(a - bpm) ? b : a));
+  const refPct = ref.pctAtTempo[nearest];
+  const refMs = (refPct / 100) * beatMs;
+  const ratio = pct / refPct;
+
+  const verdict =
+    ratio <= 1
+      ? `Your spread is at or below the ${ref.level.toLowerCase()}' average.`
+      : `Your spread is ${ratio.toFixed(1)}× the ${ref.level.toLowerCase()}' average (lower is better).`;
+  const tempoNote =
+    nearest === bpm ? "" : ` The study tested ${tested.join(", ")} BPM; compared at the nearest, ${nearest} BPM.`;
+
+  const div = document.createElement("div");
+  div.className = "reference";
+  div.innerHTML = `
+    <p><strong>${ref.level}:</strong> about ${refPct}% of the beat (≈${Math.round(refMs)} ms at ${bpm} BPM).
+       You: ${pct.toFixed(1)}%.</p>
+    <p class="verdict">${verdict}</p>
+    <p class="source">${ref.who} Measure: ${ref.measure}${tempoNote}<br>
+       Source: <a href="${ref.url}" target="_blank" rel="noopener">${ref.citation}</a></p>`;
+  return div;
+}
+
 // ---------- Chart ----------
 
 const MAX_POINTS = 60;
@@ -454,7 +621,7 @@ function showAudioError(err) {
       : "Could not start audio: " + err.message;
 }
 
-// Results are kept across pauses; "Clear results" starts over.
+// Start begins a new timed session; after a pause it resumes the current one.
 async function start() {
   if (running || latency === null) return;
   try {
@@ -462,7 +629,16 @@ async function start() {
   } catch (err) {
     return showAudioError(err);
   }
+  if (!paused) {
+    clearResults();
+    sessionLength = chosenSessionLength();
+    remainingMs = sessionLength * 1000;
+    ui.summary.hidden = true;
+  }
+  paused = false;
+  setSessionControlsDisabled(true);
   startMetronome(Number(ui.bpm.value));
+  startCountdown();
   ui.start.disabled = true;
   ui.pause.disabled = false;
   ui.calibrate.disabled = true;
@@ -472,6 +648,8 @@ async function start() {
 function pause() {
   if (!running) return;
   stopMetronome();
+  stopCountdown();
+  paused = true;
   ui.start.disabled = false;
   ui.start.textContent = "Resume";
   ui.pause.disabled = true;
@@ -492,11 +670,13 @@ ui.mic.addEventListener("change", async () => {
 ui.calibrate.addEventListener("click", calibrate);
 ui.start.addEventListener("click", start);
 ui.pause.addEventListener("click", pause);
-ui.reset.addEventListener("click", () => {
-  offsets = [];
-  ignored = 0;
-  if (!running) ui.start.textContent = "Start";
-  render();
+ui.reset.addEventListener("click", resetSession);
+ui.newSession.addEventListener("click", () => {
+  resetSession();
+  start();
+});
+ui.sessionLength.addEventListener("change", () => {
+  ui.customWrap.hidden = ui.sessionLength.value !== "custom";
 });
 
 ui.start.disabled = true;
