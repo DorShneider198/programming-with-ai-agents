@@ -62,27 +62,21 @@
 
     <section id="summary" class="panel summary" hidden>
       <h2>Session summary</h2>
-      <p id="summary-meta" class="muted"></p>
-      <div class="stats">
-        <div><span class="muted">Hits</span><strong id="sum-count"></strong></div>
-        <div><span class="muted">Average offset</span><strong id="sum-mean"></strong></div>
-        <div><span class="muted">Consistency (std. dev.)</span><strong id="sum-sd"></strong></div>
+      <div class="hero">
+        <span class="muted">Your timing spread</span>
+        <strong id="sum-sd" class="hero-value"></strong>
+        <span id="sum-sub" class="muted"></span>
       </div>
 
-      <h3>Compared with published research</h3>
       <div id="sum-compare"></div>
 
-      <p class="note">
-        <strong>Measurement error:</strong> this app times your hits with a laptop speaker and its
-        built-in mic, which add timing error of their own. Differences of a few milliseconds
-        between you and a reference level are not meaningful. The study used a dedicated
-        microphone on each drum.
+      <p class="footnote">
+        Lower is better. A laptop mic adds a few ms of error, so small differences don't matter.
       </p>
-      <p class="note">
-        <strong>Levels not shown:</strong> non-musician, amateur and experienced (non-professional)
-        drummer levels are left out. No published values of this measure for those groups could
-        be verified.
-      </p>
+      <details class="sources">
+        <summary>Sources</summary>
+        <ol id="sum-sources"></ol>
+      </details>
       <button id="new-session" type="button" class="primary">New session</button>
     </section>
 

@@ -14,11 +14,10 @@ const ui = {
   customWrap: $("custom-wrap"),
   countdown: $("countdown"),
   summary: $("summary"),
-  summaryMeta: $("summary-meta"),
-  sumCount: $("sum-count"),
-  sumMean: $("sum-mean"),
   sumSd: $("sum-sd"),
+  sumSub: $("sum-sub"),
   sumCompare: $("sum-compare"),
+  sumSources: $("sum-sources"),
   newSession: $("new-session"),
   threshold: $("threshold"),
   thresholdValue: $("threshold-value"),
@@ -435,19 +434,18 @@ function resetSession() {
 // each hit's offset from the click). Only levels with verified published values
 // of this same measure are listed; others are left out rather than estimated.
 
+// Studies give the spread as a percentage of the beat, so it's converted to ms
+// at the session's tempo, using the nearest tempo each study tested.
 const REFERENCES = [
   {
-    level: "Professional drummers",
+    level: "Professional drummer",
     // Fujii et al. (2011), p. 500: the SD of synchronization error as a percentage
     // of the beat interval "was around 2% in the 60 and 120 bpm conditions,
     // whereas it was around 4% at the 200 bpm tempo".
     pctAtTempo: { 60: 2, 120: 2, 200: 4 },
-    who:
-      "15 professional drummers (26.5 years of experience on average) playing a basic beat " +
-      "on a drum kit, with the metronome in headphones, for 60 seconds per tempo.",
-    measure:
-      "Standard deviation of each hit's offset from the click, as a percentage of the beat " +
-      "interval. This is the same measure as the consistency shown here.",
+    about:
+      "15 professional drummers playing a drum kit with a metronome. Measure: standard " +
+      "deviation of each hit's offset from the click, the same as this app's spread.",
     citation:
       "Fujii, S., Hirashima, M., Kudo, K., Ohtsuki, T., Nakamura, Y., & Oda, S. (2011). " +
       "Synchronization error of drum kit playing with a metronome at different tempi by " +
@@ -458,58 +456,58 @@ const REFERENCES = [
 
 const MIN_HITS_FOR_COMPARISON = 10;
 
+function referenceMs(ref, beatMs) {
+  const tested = Object.keys(ref.pctAtTempo).map(Number);
+  const nearest = tested.reduce((a, b) => (Math.abs(b - bpm) < Math.abs(a - bpm) ? b : a));
+  return (ref.pctAtTempo[nearest] / 100) * beatMs;
+}
+
 function showSummary() {
   const n = offsets.length;
-  const beatMs = 60000 / bpm;
-  const extra = ignored ? ` · ${ignored} extra sound${ignored === 1 ? "" : "s"} ignored` : "";
-  ui.summaryMeta.textContent = `${sessionLength} seconds at ${bpm} BPM${extra}`;
-  ui.sumCount.textContent = n;
-  ui.sumMean.textContent = n ? `${fmt(mean(offsets))} (${describe(mean(offsets))})` : "–";
-  ui.sumCompare.innerHTML = "";
+  const sd = n > 1 ? stdDev(offsets) : null;
+  const m = n ? Math.round(mean(offsets)) : 0;
+  const avg = !n ? "" : m === 0 ? "Average right on the click · " : `Average ${Math.abs(m)} ms ${describe(m)} · `;
+  ui.sumSd.textContent = sd === null ? "–" : `±${Math.round(sd)} ms`;
+  ui.sumSub.textContent = `${avg}${n} hits · ${sessionLength} s at ${bpm} BPM`;
 
-  if (n < 2) {
-    ui.sumSd.textContent = "–";
-  } else {
-    const sd = stdDev(offsets);
-    const pct = (sd / beatMs) * 100;
-    ui.sumSd.textContent = `±${Math.round(sd)} ms (${pct.toFixed(1)}% of the beat)`;
-    if (n >= MIN_HITS_FOR_COMPARISON) {
-      for (const ref of REFERENCES) ui.sumCompare.append(compareWith(ref, pct, beatMs));
-    }
-  }
-  if (n < MIN_HITS_FOR_COMPARISON) {
+  ui.sumCompare.innerHTML = "";
+  if (sd === null || n < MIN_HITS_FOR_COMPARISON) {
     const p = document.createElement("p");
-    p.textContent = `Too few hits for a meaningful comparison (need at least ${MIN_HITS_FOR_COMPARISON}).`;
+    p.textContent = `Play at least ${MIN_HITS_FOR_COMPARISON} hits to see how you compare.`;
     ui.sumCompare.append(p);
+  } else {
+    ui.sumCompare.append(levelsTable(sd));
   }
+
+  ui.sumSources.innerHTML = REFERENCES.map(
+    (ref) => `<li>${ref.about} <a href="${ref.url}" target="_blank" rel="noopener">${ref.citation}</a></li>`
+  ).join("");
 
   ui.summary.hidden = false;
   ui.summary.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function compareWith(ref, pct, beatMs) {
-  const tested = Object.keys(ref.pctAtTempo).map(Number);
-  const nearest = tested.reduce((a, b) => (Math.abs(b - bpm) < Math.abs(a - bpm) ? b : a));
-  const refPct = ref.pctAtTempo[nearest];
-  const refMs = (refPct / 100) * beatMs;
-  const ratio = pct / refPct;
+// One row per level plus a highlighted "You" row, sorted from tightest spread.
+function levelsTable(sd) {
+  const beatMs = 60000 / bpm;
+  const rows = REFERENCES.map((ref, i) => ({ name: ref.level, ms: referenceMs(ref, beatMs), note: i + 1 }));
+  rows.push({ name: "You", ms: sd, you: true });
+  rows.sort((a, b) => a.ms - b.ms);
 
-  const verdict =
-    ratio <= 1
-      ? `Your spread is at or below the ${ref.level.toLowerCase()}' average.`
-      : `Your spread is ${ratio.toFixed(1)}× the ${ref.level.toLowerCase()}' average (lower is better).`;
-  const tempoNote =
-    nearest === bpm ? "" : ` The study tested ${tested.join(", ")} BPM; compared at the nearest, ${nearest} BPM.`;
-
-  const div = document.createElement("div");
-  div.className = "reference";
-  div.innerHTML = `
-    <p><strong>${ref.level}:</strong> about ${refPct}% of the beat (≈${Math.round(refMs)} ms at ${bpm} BPM).
-       You: ${pct.toFixed(1)}%.</p>
-    <p class="verdict">${verdict}</p>
-    <p class="source">${ref.who} Measure: ${ref.measure}${tempoNote}<br>
-       Source: <a href="${ref.url}" target="_blank" rel="noopener">${ref.citation}</a></p>`;
-  return div;
+  const wrap = document.createElement("div");
+  wrap.innerHTML = `
+    <h3>How you compare <span class="muted">at ${bpm} BPM</span></h3>
+    <table class="levels">
+      <thead><tr><th>Level</th><th>Typical spread</th></tr></thead>
+      <tbody>${rows
+        .map(
+          (r) => `<tr${r.you ? ' class="you"' : ""}>
+            <td>${r.name}${r.note ? `<sup><a href="#sum-sources" title="Source ${r.note}">${r.note}</a></sup>` : ""}</td>
+            <td>±${Math.round(r.ms)} ms</td></tr>`
+        )
+        .join("")}</tbody>
+    </table>`;
+  return wrap;
 }
 
 // ---------- Chart ----------
@@ -674,6 +672,10 @@ ui.reset.addEventListener("click", resetSession);
 ui.newSession.addEventListener("click", () => {
   resetSession();
   start();
+});
+// The footnote numbers in the levels table open the Sources list.
+ui.sumCompare.addEventListener("click", (e) => {
+  if (e.target.closest("sup a")) ui.sumSources.parentElement.open = true;
 });
 ui.sessionLength.addEventListener("change", () => {
   ui.customWrap.hidden = ui.sessionLength.value !== "custom";
