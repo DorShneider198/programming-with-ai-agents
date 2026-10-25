@@ -430,18 +430,12 @@ function resetSession() {
 
 // ---------- Session summary ----------
 // Reference levels from published research, compared on consistency (the SD of
-// each hit's offset from the click). Only levels with verified published values
-// of this same measure are listed; others are left out rather than estimated.
+// hits' timing while playing with a click). Only levels with published values
+// are listed; others are left out rather than estimated.
 
-// Studies give the spread as a percentage of the beat, so it's converted to ms
-// at the session's tempo, using the nearest tempo each study tested.
-const REFERENCES = [
-  {
-    level: "Professional drummer",
-    // Fujii et al. (2011), p. 500: the SD of synchronization error as a percentage
-    // of the beat interval "was around 2% in the 60 and 120 bpm conditions,
-    // whereas it was around 4% at the 200 bpm tempo".
-    pctAtTempo: { 60: 2, 120: 2, 200: 4 },
+const STUDIES = {
+  fujii: {
+    short: "Fujii et al., 2011",
     about:
       "15 professional drummers playing a drum kit with a metronome, 60 seconds per tempo. " +
       "Measure: standard deviation of each hit's offset from the click, the same as this app.",
@@ -451,17 +445,55 @@ const REFERENCES = [
       "professional drummers. Music Perception, 28(5), 491–503.",
     url: "https://doi.org/10.1525/mp.2011.28.5.491",
   },
+  krause: {
+    short: "Krause et al., 2010",
+    about:
+      "12 people per group tapping a finger on a pad to an audio click every 800 ms (75 BPM) " +
+      "for 210 seconds. Values are read from the bar chart in Fig. 3 (auditory panel), since the " +
+      "paper doesn't print them; reading accuracy is about ±1 ms. The paper calls the measure " +
+      "\"standard deviation\" and \"inter-tap variability\" without saying whether it is the spread " +
+      "of offsets from the click (this app's measure) or of the gaps between taps. In that study " +
+      "only the drummers differed reliably from the other groups.",
+    citation:
+      "Krause, V., Pollok, B., & Schnitzler, A. (2010). Perception in action: The impact of " +
+      "sensory information on sensorimotor synchronization in musicians and non-musicians. " +
+      "Acta Psychologica, 133(1), 28–37.",
+    url: "https://doi.org/10.1016/j.actpsy.2009.08.003",
+  },
+};
+
+// Each measurement is either a percentage of the beat or ms at a given tempo.
+const REFERENCES = [
+  {
+    level: "Professional drummer",
+    study: "fujii",
+    // p. 500: SD as a percentage of the beat interval "was around 2% in the 60
+    // and 120 bpm conditions, whereas it was around 4% at the 200 bpm tempo".
+    measured: [{ bpm: 60, pct: 2 }, { bpm: 120, pct: 2 }, { bpm: 200, pct: 4 }],
+  },
+  // Krause et al. (2010), Fig. 3 auditory panel, bar heights measured from the figure.
+  { level: "Experienced drummer", group: "drummers, 15 years' experience", study: "krause", measured: [{ bpm: 75, ms: 21 }] },
+  { level: "Professional musician", group: "professional pianists", study: "krause", measured: [{ bpm: 75, ms: 28 }] },
+  { level: "Amateur musician", group: "amateur pianists", study: "krause", measured: [{ bpm: 75, ms: 33 }] },
+  { level: "Non-musician", study: "krause", measured: [{ bpm: 75, ms: 34 }] },
 ];
 
 const MIN_HITS_FOR_COMPARISON = 10;
 
-function nearestTestedTempo(ref) {
-  const tested = Object.keys(ref.pctAtTempo).map(Number);
-  return tested.reduce((a, b) => (Math.abs(b - bpm) < Math.abs(a - bpm) ? b : a));
+function nearestMeasurement(ref) {
+  return ref.measured.reduce((a, b) => (Math.abs(b.bpm - bpm) < Math.abs(a.bpm - bpm) ? b : a));
 }
 
+// Converted to the session's tempo in proportion to the beat length. Fujii et
+// al. found the same percentage at 60 and 120 BPM, which supports this.
 function referenceMs(ref, beatMs) {
-  return (ref.pctAtTempo[nearestTestedTempo(ref)] / 100) * beatMs;
+  const m = nearestMeasurement(ref);
+  const pct = m.pct ?? (m.ms / (60000 / m.bpm)) * 100;
+  return (pct / 100) * beatMs;
+}
+
+function describeMeasurement(m) {
+  return m.pct !== undefined ? `${m.pct}% of the beat at ${m.bpm} BPM` : `±${m.ms} ms at ${m.bpm} BPM`;
 }
 
 // Top: one big number and the levels table. Everything else goes in "Details".
@@ -521,24 +553,21 @@ function summaryDetails(n, sd) {
         `It is ${((sd / beatMs) * 100).toFixed(1)}% of the beat.</p>`
     );
   }
-  for (const ref of REFERENCES) {
-    const tested = Object.keys(ref.pctAtTempo);
-    const nearest = nearestTestedTempo(ref);
-    parts.push(
-      `<p><strong>${ref.level} level:</strong> ` +
-        tested.map((t) => `${ref.pctAtTempo[t]}% of the beat at ${t} BPM`).join(", ") +
-        `. Converted to ms at your tempo using ${nearest} BPM, the nearest tested tempo.</p>`
-    );
-  }
   parts.push(
-    `<p><strong>Measurement error:</strong> a laptop speaker and built-in mic add timing error of their own, ` +
-      `so differences of a few ms aren't meaningful. The study used a microphone on each drum.</p>`,
-    `<p><strong>Levels not shown yet:</strong> non-musician, amateur and experienced drummer. ` +
-      `No verified published numbers for this measure yet.</p>`,
-    `<p><strong>Sources:</strong></p><ol>` +
+    `<p><strong>Levels:</strong></p><ul>` +
       REFERENCES.map(
-        (ref) => `<li>${ref.about} <a href="${ref.url}" target="_blank" rel="noopener">${ref.citation}</a></li>`
+        (ref) =>
+          `<li>${ref.level}${ref.group ? ` (${ref.group})` : ""}: ` +
+          `${ref.measured.map(describeMeasurement).join(", ")} (${STUDIES[ref.study].short})</li>`
       ).join("") +
+      `</ul><p>Each is converted to your tempo in proportion to the beat length, ` +
+      `using the study's nearest tested tempo.</p>`,
+    `<p><strong>Measurement error:</strong> a laptop speaker and built-in mic add timing error of their own, ` +
+      `so differences of a few ms aren't meaningful. The studies used a microphone on each drum or a sensor pad.</p>`,
+    `<p><strong>Sources:</strong></p><ol>` +
+      Object.values(STUDIES)
+        .map((s) => `<li>${s.about} <a href="${s.url}" target="_blank" rel="noopener">${s.citation}</a></li>`)
+        .join("") +
       `</ol>`
   );
   return parts.join("");
