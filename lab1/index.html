@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Drum Timing Trainer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main>
+    <h1>Drum Timing Trainer</h1>
+    <p class="hint">No headphones: the click plays from the laptop speakers and the built-in mic listens. Calibrate once, then keep the volume where it is.</p>
+
+    <section class="panel controls">
+      <div class="row">
+        <label for="bpm">Tempo</label>
+        <input id="bpm-range" type="range" min="40" max="240" value="90" aria-label="Tempo slider">
+        <input id="bpm" type="number" min="40" max="240" value="90"> <span>BPM</span>
+      </div>
+
+      <div class="row">
+        <label for="threshold">Sensitivity</label>
+        <input id="threshold" type="range" min="0.01" max="0.8" step="0.01" value="0.2">
+        <span id="threshold-value">0.20</span>
+      </div>
+      <div class="row">
+        <span class="label">Mic level</span>
+        <div class="meter"><div id="meter-fill"></div><div id="meter-threshold"></div></div>
+      </div>
+
+      <div class="row">
+        <label for="mic">Mic</label>
+        <select id="mic"><option>Chosen when you press Start</option></select>
+        <span id="mic-warning" class="muted"></span>
+      </div>
+      <div class="row">
+        <span class="label">Latency</span>
+        <span id="latency" class="muted">Not calibrated yet</span>
+        <button id="calibrate" type="button">Calibrate</button>
+      </div>
+
+      <div class="row buttons">
+        <button id="start" type="button" class="primary">Start</button>
+        <button id="pause" type="button" disabled>Pause</button>
+        <button id="reset" type="button">Clear results</button>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </section>
+
+    <section class="panel">
+      <div class="last-hit">
+        <span id="last-offset">–</span>
+        <span id="last-label" class="muted"></span>
+      </div>
+
+      <div class="stats">
+        <div><span class="muted">Hits</span><strong id="stat-count">0</strong></div>
+        <div><span class="muted">Average offset</span><strong id="stat-mean">–</strong></div>
+        <div><span class="muted">Consistency (std. dev.)</span><strong id="stat-sd">–</strong></div>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="chart" aria-label="Offset of each hit in milliseconds; above zero is late, below is early"></canvas>
+        <div id="tooltip" class="tooltip" hidden></div>
+      </div>
+
+      <details>
+        <summary>Show as table</summary>
+        <table>
+          <thead><tr><th>Hit</th><th>Offset (ms)</th></tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </details>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

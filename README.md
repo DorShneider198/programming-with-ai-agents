@@ -8,9 +8,15 @@ Each lab lives in its own top-level folder:
 
 ```
 .
-├── Lab1/   # Lab 1
-├── Lab2/   # Lab 2 (future)
+├── lab1/   # Lab 1: Drum Timing Trainer
+├── lab2/   # Lab 2 (future)
 └── ...
 ```
 
 See the README inside each lab folder (when present) for lab-specific details.
+
+## Live pages
+
+Each lab is published with GitHub Pages:
+
+- Lab 1, Drum Timing Trainer: https://dorshneider198.github.io/programming-with-ai-agents/lab1/
