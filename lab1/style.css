@@ -153,29 +153,40 @@ button:disabled { opacity: 0.5; cursor: default; }
 .summary h3 .muted { font-weight: 400; }
 
 .hero { display: flex; flex-direction: column; gap: 2px; }
+.hero-label { font-size: 1.1rem; }
 .hero-value {
-  font-size: 3rem;
+  font-size: 3.4rem;
   line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
 table.levels { width: 100%; margin: 0; }
-table.levels th, table.levels td { padding: 10px 12px; }
+table.levels th, table.levels td { padding: 12px; }
 table.levels th { font-size: 0.85rem; font-weight: 600; color: var(--text-muted); }
 table.levels th:first-child, table.levels td:first-child { text-align: left; }
-table.levels sup a { color: var(--text-muted); text-decoration: none; margin-left: 2px; }
+table.levels td { font-size: 1.05rem; }
 table.levels tr.you td {
   font-weight: 700;
   background: color-mix(in srgb, var(--series) 14%, transparent);
 }
 table.levels tr.you td:first-child { box-shadow: inset 3px 0 0 var(--series); }
+.you-here {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--series);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  vertical-align: 2px;
+}
 
-.footnote { color: var(--text-muted); font-size: 0.85rem; margin: 12px 0 4px; }
-.sources { font-size: 0.85rem; color: var(--text-muted); margin: 0 0 16px; }
-.sources summary { cursor: pointer; }
-.sources ol { margin: 8px 0 0; padding-left: 20px; }
-.sources li { margin-bottom: 6px; }
-.sources a { color: inherit; }
+.details { font-size: 0.9rem; color: var(--text-muted); margin: 20px 0 16px; }
+.details summary { cursor: pointer; color: var(--text); font-weight: 600; }
+.details p { margin: 8px 0; }
+.details ol { margin: 4px 0 0; padding-left: 20px; }
+.details a { color: inherit; }
 
 .chart-wrap { position: relative; }
 #chart { display: block; width: 100%; height: 260px; }

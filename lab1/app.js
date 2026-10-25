@@ -15,9 +15,8 @@ const ui = {
   countdown: $("countdown"),
   summary: $("summary"),
   sumSd: $("sum-sd"),
-  sumSub: $("sum-sub"),
   sumCompare: $("sum-compare"),
-  sumSources: $("sum-sources"),
+  sumDetails: $("sum-details"),
   newSession: $("new-session"),
   threshold: $("threshold"),
   thresholdValue: $("threshold-value"),
@@ -444,8 +443,8 @@ const REFERENCES = [
     // whereas it was around 4% at the 200 bpm tempo".
     pctAtTempo: { 60: 2, 120: 2, 200: 4 },
     about:
-      "15 professional drummers playing a drum kit with a metronome. Measure: standard " +
-      "deviation of each hit's offset from the click, the same as this app's spread.",
+      "15 professional drummers playing a drum kit with a metronome, 60 seconds per tempo. " +
+      "Measure: standard deviation of each hit's offset from the click, the same as this app.",
     citation:
       "Fujii, S., Hirashima, M., Kudo, K., Ohtsuki, T., Nakamura, Y., & Oda, S. (2011). " +
       "Synchronization error of drum kit playing with a metronome at different tempi by " +
@@ -456,19 +455,20 @@ const REFERENCES = [
 
 const MIN_HITS_FOR_COMPARISON = 10;
 
-function referenceMs(ref, beatMs) {
+function nearestTestedTempo(ref) {
   const tested = Object.keys(ref.pctAtTempo).map(Number);
-  const nearest = tested.reduce((a, b) => (Math.abs(b - bpm) < Math.abs(a - bpm) ? b : a));
-  return (ref.pctAtTempo[nearest] / 100) * beatMs;
+  return tested.reduce((a, b) => (Math.abs(b - bpm) < Math.abs(a - bpm) ? b : a));
 }
 
+function referenceMs(ref, beatMs) {
+  return (ref.pctAtTempo[nearestTestedTempo(ref)] / 100) * beatMs;
+}
+
+// Top: one big number and the levels table. Everything else goes in "Details".
 function showSummary() {
   const n = offsets.length;
   const sd = n > 1 ? stdDev(offsets) : null;
-  const m = n ? Math.round(mean(offsets)) : 0;
-  const avg = !n ? "" : m === 0 ? "Average right on the click · " : `Average ${Math.abs(m)} ms ${describe(m)} · `;
   ui.sumSd.textContent = sd === null ? "–" : `±${Math.round(sd)} ms`;
-  ui.sumSub.textContent = `${avg}${n} hits · ${sessionLength} s at ${bpm} BPM`;
 
   ui.sumCompare.innerHTML = "";
   if (sd === null || n < MIN_HITS_FOR_COMPARISON) {
@@ -478,36 +478,70 @@ function showSummary() {
   } else {
     ui.sumCompare.append(levelsTable(sd));
   }
-
-  ui.sumSources.innerHTML = REFERENCES.map(
-    (ref) => `<li>${ref.about} <a href="${ref.url}" target="_blank" rel="noopener">${ref.citation}</a></li>`
-  ).join("");
+  ui.sumDetails.innerHTML = summaryDetails(n, sd);
 
   ui.summary.hidden = false;
   ui.summary.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-// One row per level plus a highlighted "You" row, sorted from tightest spread.
+// One row per level plus a highlighted "You" row, sorted from steadiest.
 function levelsTable(sd) {
   const beatMs = 60000 / bpm;
-  const rows = REFERENCES.map((ref, i) => ({ name: ref.level, ms: referenceMs(ref, beatMs), note: i + 1 }));
+  const rows = REFERENCES.map((ref) => ({ name: ref.level, ms: referenceMs(ref, beatMs) }));
   rows.push({ name: "You", ms: sd, you: true });
   rows.sort((a, b) => a.ms - b.ms);
 
   const wrap = document.createElement("div");
   wrap.innerHTML = `
-    <h3>How you compare <span class="muted">at ${bpm} BPM</span></h3>
+    <h3>How you compare</h3>
     <table class="levels">
-      <thead><tr><th>Level</th><th>Typical spread</th></tr></thead>
+      <thead><tr><th>Level</th><th>Hits vary by (at ${bpm} BPM)</th></tr></thead>
       <tbody>${rows
         .map(
           (r) => `<tr${r.you ? ' class="you"' : ""}>
-            <td>${r.name}${r.note ? `<sup><a href="#sum-sources" title="Source ${r.note}">${r.note}</a></sup>` : ""}</td>
+            <td>${r.name}${r.you ? '<span class="you-here">You are here</span>' : ""}</td>
             <td>±${Math.round(r.ms)} ms</td></tr>`
         )
         .join("")}</tbody>
     </table>`;
   return wrap;
+}
+
+function summaryDetails(n, sd) {
+  const beatMs = 60000 / bpm;
+  const m = n ? Math.round(mean(offsets)) : 0;
+  const avg = !n ? "" : m === 0 ? ", average right on the click" : `, average ${Math.abs(m)} ms ${describe(m)}`;
+  const extra = ignored ? `, ${ignored} extra sound${ignored === 1 ? "" : "s"} ignored` : "";
+  const parts = [`<p><strong>Session:</strong> ${n} hits in ${sessionLength} s at ${bpm} BPM${avg}${extra}.</p>`];
+
+  if (sd !== null) {
+    parts.push(
+      `<p><strong>What the number means:</strong> the standard deviation of your hits' offsets from the click. ` +
+        `About two out of three hits land within this range of your average timing. ` +
+        `It is ${((sd / beatMs) * 100).toFixed(1)}% of the beat.</p>`
+    );
+  }
+  for (const ref of REFERENCES) {
+    const tested = Object.keys(ref.pctAtTempo);
+    const nearest = nearestTestedTempo(ref);
+    parts.push(
+      `<p><strong>${ref.level} level:</strong> ` +
+        tested.map((t) => `${ref.pctAtTempo[t]}% of the beat at ${t} BPM`).join(", ") +
+        `. Converted to ms at your tempo using ${nearest} BPM, the nearest tested tempo.</p>`
+    );
+  }
+  parts.push(
+    `<p><strong>Measurement error:</strong> a laptop speaker and built-in mic add timing error of their own, ` +
+      `so differences of a few ms aren't meaningful. The study used a microphone on each drum.</p>`,
+    `<p><strong>Levels not shown yet:</strong> non-musician, amateur and experienced drummer. ` +
+      `No verified published numbers for this measure yet.</p>`,
+    `<p><strong>Sources:</strong></p><ol>` +
+      REFERENCES.map(
+        (ref) => `<li>${ref.about} <a href="${ref.url}" target="_blank" rel="noopener">${ref.citation}</a></li>`
+      ).join("") +
+      `</ol>`
+  );
+  return parts.join("");
 }
 
 // ---------- Chart ----------
@@ -672,10 +706,6 @@ ui.reset.addEventListener("click", resetSession);
 ui.newSession.addEventListener("click", () => {
   resetSession();
   start();
-});
-// The footnote numbers in the levels table open the Sources list.
-ui.sumCompare.addEventListener("click", (e) => {
-  if (e.target.closest("sup a")) ui.sumSources.parentElement.open = true;
 });
 ui.sessionLength.addEventListener("change", () => {
   ui.customWrap.hidden = ui.sessionLength.value !== "custom";

@@ -63,19 +63,16 @@
     <section id="summary" class="panel summary" hidden>
       <h2>Session summary</h2>
       <div class="hero">
-        <span class="muted">Your timing spread</span>
+        <span class="hero-label">Your hits vary by</span>
         <strong id="sum-sd" class="hero-value"></strong>
-        <span id="sum-sub" class="muted"></span>
+        <span class="muted">Lower is steadier.</span>
       </div>
 
       <div id="sum-compare"></div>
 
-      <p class="footnote">
-        Lower is better. A laptop mic adds a few ms of error, so small differences don't matter.
-      </p>
-      <details class="sources">
-        <summary>Sources</summary>
-        <ol id="sum-sources"></ol>
+      <details class="details">
+        <summary>Details</summary>
+        <div id="sum-details"></div>
       </details>
       <button id="new-session" type="button" class="primary">New session</button>
     </section>
