@@ -1,0 +1,33 @@
+I've built both files: `dashboard.html` is new, and `proxy.py` is extended to record traffic and serve the page. **None of it has been run.** This session can't run Python or a browser (those commands need approval, and Node isn't installed), so I could only check the code by reading it. Please run it once before relying on it:
+
+```
+python3 proxy.py --demo
+open http://localhost:8041/__dashboard
+```
+
+**`proxy.py`**
+- Every request gets an exchange id. The proxy keeps the last 500 exchanges in memory and streams them as live events to the page at `/__events`. A page that opens or reloads late first gets everything stored so far.
+- Paths starting with `/__` are handled locally: they are never forwarded and never printed.
+- Each open page has its own queue, and a page that falls 1000 events behind is dropped, so a slow page can't slow down relaying.
+- The page is read from disk on every request, so a reload picks up edits.
+- Forwarding is unchanged: same `SKIP` set, replies stream back chunk by chunk, same terminal output. The only addition is one extra startup line giving the dashboard URL.
+- The end-of-reply event is always sent, even when the upstream can't be reached, the stream breaks, or the agent disconnects, so no row stays "pending".
+- `--demo` replays the sample from section 9 through the same recording code as real traffic, then waits 10 s and loops. Each pass uses new session and tool ids, so later passes show up as new threads (C, D, …) instead of piling onto A and B.
+
+**`dashboard.html`** (plain JS, no outside requests, data shown with `textContent` only) covers what the spec asks for:
+- Replies are rebuilt as they stream.
+- Requests are classified as main, side or probe, and grouped into threads with chips.
+- "New this turn" uses the longest-common-prefix rule, with the "history changed" warning.
+- Tool calls and results are paired by id and update live, with a working "result in #N" link.
+- Errors and tool errors are counted separately and look different (red vs amber).
+- Filters, the "↑ N new" pill and Follow newest work as described.
+- Message cards use the spec's colors and labels.
+- All the detail sections are there, with system/tools/params diffs against the previous request.
+
+**Where I interpreted the spec:**
+- **Side calls and threads:** threads are created only by main requests. Title calls, quota probes and suggestion calls join the thread of their session; otherwise they would have taken letters A and B for themselves.
+- **Text that isn't the user's:** a text block next to a tool result (e.g. "Tool loaded.") and the `[SUGGESTION MODE: …]` message are labelled **INJECTED CONTEXT**, not **YOU**.
+- **String/array switch (check 7):** the new prompt is a plain string in main request 3 and becomes an array in request 4, because the switch can only happen once a message has appeared in an earlier request. The check passes if request 4 shows no "history changed" warning.
+- **The 502:** it's a retry of the broken request 6 in thread A, so its row shows `+0 msgs`.
+
+Checks 1–18 are the quickest way to confirm the build, and 19–20 need a real `claude` session through the proxy.
