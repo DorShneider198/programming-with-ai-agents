@@ -693,10 +693,12 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
     side calls**. Main request 3 shows no "history changed" warning, and its
     "New this turn" does not include the suggestion message.
 
-With a real agent (`ANTHROPIC_BASE_URL=http://localhost:8041 claude`, then ask
-it to read a file):
+With a real agent. Restart the proxy **without `--demo`** first: the demo's
+sessions would otherwise take the first thread letters, and check 21 could not
+pass. Then run `ANTHROPIC_BASE_URL=http://localhost:8041 claude` and ask it to
+read a file:
 
 20. The agent works exactly as without the dashboard. The terminal still prints
     the same output, and `/__` requests are not printed.
-21. The real session shows up as main thread `A`, with its title call and
+21. With no demo running, the real session shows up as main thread `A`, with its title call and
     probes as side rows. The `Read` call pairs with its result.
