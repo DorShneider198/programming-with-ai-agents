@@ -156,7 +156,7 @@ from request to request.
 |---|---|---|
 | user | `{"type":"text","text":...}` | The user's prompt. The first user message holds several text blocks. Blocks whose text starts with `<system-reminder>` are context the agent added, not something the user typed. |
 | user | `{"type":"tool_result","tool_use_id":"toolu_...","content":...,"is_error"?:true}` | `content` is a string **or** an array of blocks, e.g. `[{"type":"tool_reference","tool_name":"TaskStop"}]` or `[{"type":"text",...}]`. |
-| user | text next to a tool_result | One user message may hold a `tool_result` followed by a `text` block (e.g. `"Tool loaded."`). |
+| user | text next to a tool_result | One user message may hold a `tool_result` followed by a `text` block (e.g. `"Tool loaded."`). The agent adds this text, not the user: show it as `INJECTED CONTEXT`, never `YOU`. |
 | **system** | `{"role":"system","content":[...]}` | A system message in the middle of `messages`, not a top-level field. Contains a long `text` block (about 26 KB of agent context) and `{"type":"tool_addition","tool":{"type":"tool_definition","definition":{name, description, input_schema}}}` blocks, which are tools added during the session. |
 | assistant | `{"type":"text","text":...}` | Model text. |
 | assistant | `{"type":"thinking","thinking":"","signature":"<long base64>"}` | Thinking is usually **empty** (hidden) and only carries a signature. |
@@ -315,9 +315,13 @@ Group exchanges into **threads**:
 - Thread key = session id header + the text of the last `system` block (first
   300 characters) + the first user message normalized as in 5.2 (first 300
   characters).
-- Thread names are assigned in order of first appearance: `A`, `B`, `C`, ...
-  Each thread gets a color from a fixed palette (blue, teal, amber, pink,
-  slate).
+- Thread **letters go to main threads only**, in order of their first main
+  request: `A`, `B`, `C`, ... Each gets a color from a fixed palette (blue,
+  teal, amber, pink, slate). Side calls and probes of a session are shown with
+  that session's main-thread letter in a faded chip (or `·` if the session has
+  no main thread yet). *Why:* probes and the title call arrive before the first
+  main request, so "first appearance" would hand them `A`; every build so far
+  had to make this call on its own.
 - Probes with no body go into no thread.
 
 A subagent (the agent's `Agent` tool) therefore shows up as its own main thread.
