@@ -613,12 +613,15 @@ The sample must include, using the shapes in section 3:
       tool_use whose input streams as `input_json_delta` fragments
       (first fragment `""`).
    2. The `Read` tool_result (string content). The reply is model text.
-   3. A new user prompt given as a **plain string**, after the previous request
-      had it as an array. The reply holds **two parallel** `Bash` tool_use
+   3. A new user prompt, given as a **plain string** (`"content": "Now run the
+      tests"`). The reply holds **two parallel** `Bash` tool_use
       blocks, each with a `description`. One `command` is a multi-line heredoc
       of about 12 lines (`git commit -F - <<'EOF'` ... `EOF`).
    4. Both results: one normal, and one with `is_error: true`. The reply is
-      text plus a `ToolSearch` call.
+      text plus a `ToolSearch` call. This request resends request 3's prompt
+      as a **one-element array** (`[{"type":"text","text":"Now run the
+      tests"}]`): the same message, switched from string to array (3.4), with
+      `cache_control` moved onto it. Nothing else in the history changes.
    5. A tool_result whose content is `[{"type":"tool_reference","tool_name":"TaskStop"}]`
       followed by a `text` block `"Tool loaded."`. `TaskStop` is **added** to
       `tools`. The reply is a final text answer with `stop_reason:"end_turn"`.
@@ -661,8 +664,8 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
    the request that carries the `is_error` result, with an amber border and a
    `tool error` chip, not a red border.
 7. "New this turn" shows only the new messages (e.g. `+2 msgs`), not the whole
-   history. The string/array switch in request 3 does **not** cause a "history
-   changed" warning.
+   history. Request 4 shows `+2 msgs` and **no** "history changed" warning,
+   even though it resends request 3's prompt as an array instead of a string.
 8. Opening the page adds no row of its own: no `/favicon.ico` exchange, and
    nothing about the browser in the terminal.
 9. The Tools header on request 5 shows `+TaskStop`. System says "unchanged".
