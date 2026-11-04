@@ -16,7 +16,7 @@ spec-history.md  written at the end from `git log --follow -p SPEC.md`
 
 1. **Build** in a fresh folder, with a fresh agent session:
    ```
-   mkdir builds/02 && cp SPEC.md proxy.py builds/02/ && cd builds/02
+   mkdir builds/01 && cp SPEC.md proxy.py builds/01/ && cd builds/01
    claude "Build the dashboard described in SPEC.md"
    ```
 2. **Run it on live traffic**, on its own port so it doesn't clash with the previous build:
@@ -28,7 +28,7 @@ spec-history.md  written at the end from `git log --follow -p SPEC.md`
 3. **Improve `SPEC.md`** (the one at the top of `lab4/`, not the copy inside the build),
    then commit it with what the last build showed:
    ```
-   git add SPEC.md builds/02 && git commit -m "Lab 4 spec: <what build 02 showed and what we changed>"
+   git add SPEC.md builds/01 && git commit -m "Lab 4 spec: <what build 01 showed and what we changed>"
    ```
 
 While a build runs, point the building agent at the previous build's proxy
