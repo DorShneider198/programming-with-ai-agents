@@ -48,6 +48,21 @@ ANTHROPIC_BASE_URL=http://localhost:8041 claude
 open http://localhost:8041/__dashboard
 ```
 
+**Test before you finish.** The build is not done until it has run:
+
+1. `python3 -m py_compile proxy.py`
+2. `python3 proxy.py --demo --port 8099` in the background, then
+   `curl -s -o /dev/null -w '%{http_code}' http://localhost:8099/__dashboard`
+   returns `200`, and `curl -s -N --max-time 5 http://localhost:8099/__events`
+   prints `reset` first, then `request` / `response_*` events.
+3. Every `<script>` in `dashboard.html` parses (for example with
+   `osascript -l JavaScript` on macOS, or `node --check` if Node is installed).
+4. Stop the background proxy.
+
+Report which of these ran and what they printed. If a command is blocked, say
+so; do not claim it passed. (Build 01 could not run any command and reported
+its checks "by reading the code", which nobody could rely on.)
+
 ## 3. What the real traffic looks like
 
 This section was taken from a real capture of Claude Code 2.1.x talking to

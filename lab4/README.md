@@ -17,8 +17,11 @@ spec-history.md  written at the end from `git log --follow -p SPEC.md`
 1. **Build** in a fresh folder, with a fresh agent session:
    ```
    mkdir builds/01 && cp SPEC.md proxy.py builds/01/ && cd builds/01
-   claude "Build the dashboard described in SPEC.md"
+   ANTHROPIC_BASE_URL=http://localhost:<previous build's port> claude -p "Build the dashboard described in SPEC.md" \
+     --permission-mode acceptEdits --allowedTools "Bash(python3:*)" "Bash(curl:*)" "Bash(osascript:*)" "Bash(kill:*)"
    ```
+   Without `--allowedTools`, a non-interactive build can write files but cannot run
+   anything, so it cannot test its own code (this happened to build 01).
 2. **Run it on live traffic**, on its own port so it doesn't clash with the previous build:
    ```
    python3 proxy.py --port 8042            # or: python3 proxy.py --port 8042 --demo
