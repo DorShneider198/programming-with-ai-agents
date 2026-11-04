@@ -381,6 +381,13 @@ Two panes:
   - totals: requests, **errors**, **tool errors**, input tokens (fresh / cache
     write / cache read), output tokens, tool calls. The two error counts follow
     the levels in 6.5 and are never added together.
+  - **Thread chips**: one chip per thread, in its color: the letter, the
+    first ~40 characters of the thread's first real user prompt (not injected
+    context), its request count, and a spinner while one of its exchanges is
+    streaming. Clicking a chip shows only that thread (its main requests and
+    the side calls of the same session); clicking it again shows all. Several
+    agents often share one proxy (a lab build running while you work, or
+    parallel builds), and their rows interleave one by one.
   - **Tool filter** dropdown: "all tools" or one tool name, built from every
     tool name seen
   - **Errors only** toggle
@@ -525,6 +532,11 @@ left, user messages are not. This makes the back-and-forth easy to scan.
 - **Tool filter X:** show only exchanges whose reply calls X, or whose new
   messages contain a result of X. In the detail pane, cards for X get a thin
   outline.
+- **Thread filter:** all filters combine (thread AND tool AND errors AND
+  hide-side). With a thread selected, **Follow newest** follows the newest
+  main exchange of that thread only, and the totals still count everything.
+  The probes with no body have no thread and are hidden while a thread is
+  selected.
 - **Errors only:** shows exchanges at any of these three levels. They are
   different things and must look different:
   1. **Error (red), counted in "errors":** the exchange itself failed. Status
@@ -611,8 +623,11 @@ The sample must include, using the shapes in section 3:
    Right after request 2's reply, a **prompt-suggestion** side call (3.2): the
    messages of request 2, plus its reply, plus a `[SUGGESTION MODE: ...]` user
    message, with the full tools. Its reply streams the text `now read SPEC.md`.
-4. One main request (with `tools`) to an unreachable upstream (`502`, `ok:false`).
-5. Realistic usage numbers (e.g. `cache_creation_input_tokens: 30315`, then
+4. A **second agent session** (its own `X-Claude-Code-Session-Id` and prompt
+   "Write a haiku about proxies") with 3 main requests, published in between
+   main requests 2–5 so the two sessions' rows interleave.
+5. One main request (with `tools`) to an unreachable upstream (`502`, `ok:false`).
+6. Realistic usage numbers (e.g. `cache_creation_input_tokens: 30315`, then
    cache reads on later turns), real-looking `toolu_`/`msg_`/`req_` ids, and
    one tool result longer than 100 lines. One tool result must contain the
    literal text `<b>hi</b><script>alert(1)</script>`, for check 15.
@@ -662,7 +677,11 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
 16. In request 3's reply, each `Bash` card shows its `description` in the
     header and its command on exactly one line, the heredoc one ending in an
     ellipsis with `⏎` marks. `full command` shows it with its line breaks.
-17. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
+17. The second session shows up as its own thread `B`, interleaved with `A`.
+    The top bar shows chips `A` and `B` with their prompts and request counts.
+    Clicking `B` shows only its 3 requests; with Follow on, the newest `B`
+    request is selected; clicking `B` again shows everything.
+18. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
     `suggested next prompt: "now read SPEC.md"`, and disappears with **Hide
     side calls**. Main request 3 shows no "history changed" warning, and its
     "New this turn" does not include the suggestion message.
@@ -670,7 +689,7 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
 With a real agent (`ANTHROPIC_BASE_URL=http://localhost:8041 claude`, then ask
 it to read a file):
 
-18. The agent works exactly as without the dashboard. The terminal still prints
+19. The agent works exactly as without the dashboard. The terminal still prints
     the same output, and `/__` requests are not printed.
-19. The real session shows up as main thread `A`, with its title call and
+20. The real session shows up as main thread `A`, with its title call and
     probes as side rows. The `Read` call pairs with its result.
