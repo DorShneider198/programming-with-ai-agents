@@ -221,8 +221,13 @@ Paths starting with `/__` are handled by the proxy itself:
 |---|---|
 | `GET /__dashboard` | `dashboard.html` from the directory of `proxy.py` (`text/html; charset=utf-8`). |
 | `GET /__events` | A Server-Sent Events stream (`text/event-stream`, `Cache-Control: no-cache`). |
+| `GET /favicon.ico` | `204 No Content`, empty body. Never forwarded, never printed, never stored as an exchange. |
 
 Every other path goes through the existing `relay()`.
+
+*Why `/favicon.ico`:* the browser requests it automatically when it opens the
+dashboard. In a build that relayed it, it went to `api.anthropic.com`, came back
+`404`, and showed up in the list as an exchange the agent never made.
 
 ### 4.2 Exchange store and events
 
@@ -630,7 +635,7 @@ The sample must include, using the shapes in section 3:
 6. Realistic usage numbers (e.g. `cache_creation_input_tokens: 30315`, then
    cache reads on later turns), real-looking `toolu_`/`msg_`/`req_` ids, and
    one tool result longer than 100 lines. One tool result must contain the
-   literal text `<b>hi</b><script>alert(1)</script>`, for check 15.
+   literal text `<b>hi</b><script>alert(1)</script>`, for check 16.
 
 ## 10. Acceptance checks (all doable by looking at the page)
 
@@ -658,30 +663,32 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
 7. "New this turn" shows only the new messages (e.g. `+2 msgs`), not the whole
    history. The string/array switch in request 3 does **not** cause a "history
    changed" warning.
-8. The Tools header on request 5 shows `+TaskStop`. System says "unchanged".
+8. Opening the page adds no row of its own: no `/favicon.ico` exchange, and
+   nothing about the browser in the terminal.
+9. The Tools header on request 5 shows `+TaskStop`. System says "unchanged".
    Expanding System shows every block in full, with character counts.
-9. The tool result over 100 lines is clamped with "show all"; expanding and
+10. The tool result over 100 lines is clamped with "show all"; expanding and
    collapsing works. Tool inputs and Raw show as collapsible JSON trees.
-10. The summary line shows input / cache write / cache read / output tokens and
+11. The summary line shows input / cache write / cache read / output tokens and
     durations. The top bar totals grow as exchanges arrive.
-11. The broken stream (request 6) and the 502 are marked as errors. No row
+12. The broken stream (request 6) and the 502 are marked as errors. No row
     stays "pending" forever.
-12. After one pass of the demo the top bar shows **2 errors** (the broken stream
+13. After one pass of the demo the top bar shows **2 errors** (the broken stream
     and the 502) and **1 tool error** (main request 4). The quota probe's `429`
     is red on its own row but is not counted and has no red border.
-13. The tool filter set to `Bash` shows only exchanges involving Bash.
-14. Reloading the page brings back all exchanges so far. Stopping the proxy
+14. The tool filter set to `Bash` shows only exchanges involving Bash.
+15. Reloading the page brings back all exchanges so far. Stopping the proxy
     shows "reconnecting", and restarting it reconnects by itself.
-15. A tool result containing `<b>hi</b><script>alert(1)</script>` shows as
+16. A tool result containing `<b>hi</b><script>alert(1)</script>` shows as
     literal text. No alert appears and nothing turns bold.
-16. In request 3's reply, each `Bash` card shows its `description` in the
+17. In request 3's reply, each `Bash` card shows its `description` in the
     header and its command on exactly one line, the heredoc one ending in an
     ellipsis with `⏎` marks. `full command` shows it with its line breaks.
-17. The second session shows up as its own thread `B`, interleaved with `A`.
+18. The second session shows up as its own thread `B`, interleaved with `A`.
     The top bar shows chips `A` and `B` with their prompts and request counts.
     Clicking `B` shows only its 3 requests; with Follow on, the newest `B`
     request is selected; clicking `B` again shows everything.
-18. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
+19. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
     `suggested next prompt: "now read SPEC.md"`, and disappears with **Hide
     side calls**. Main request 3 shows no "history changed" warning, and its
     "New this turn" does not include the suggestion message.
@@ -689,7 +696,7 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
 With a real agent (`ANTHROPIC_BASE_URL=http://localhost:8041 claude`, then ask
 it to read a file):
 
-19. The agent works exactly as without the dashboard. The terminal still prints
+20. The agent works exactly as without the dashboard. The terminal still prints
     the same output, and `/__` requests are not printed.
-20. The real session shows up as main thread `A`, with its title call and
+21. The real session shows up as main thread `A`, with its title call and
     probes as side rows. The `Read` call pairs with its result.
