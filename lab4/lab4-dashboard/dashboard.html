@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent traffic</title>
+<!-- The empty icon matters: a /favicon.ico request would be relayed upstream and show up as traffic. -->
+<link rel="icon" href="data:,">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:">
+<style>
+:root {
+  color-scheme: light;
+  --ink: #111827; --ink-2: #4b5563; --ink-3: #6b7280;
+  --line: #e5e7eb; --surface: #ffffff; --canvas: #f3f4f6;
+  --ok: #15803d; --bad: #dc2626; --warn: #b45309;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--canvas); color: var(--ink);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+button { font: inherit; color: inherit; }
+pre { margin: 0; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+[hidden] { display: none !important; }
+
+/* Top bar */
+#top {
+  position: sticky; top: 0; z-index: 5; flex: none;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  padding: 8px 14px; background: var(--surface); border-bottom: 1px solid var(--line);
+}
+#conn { display: flex; align-items: center; gap: 6px; font-weight: 600; min-width: 104px; }
+#dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); }
+#conn.live #dot { background: var(--ok); }
+.stat { display: flex; flex-direction: column; line-height: 1.2; }
+.stat b { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat span { font-size: 11px; color: var(--ink-3); }
+#controls { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-left: auto; }
+#controls label { display: flex; align-items: center; gap: 4px; cursor: pointer; white-space: nowrap; }
+#controls select { font: inherit; max-width: 170px; }
+
+/* Panes */
+#panes { flex: 1; min-height: 0; display: flex; }
+#left { position: relative; flex: 0 0 38%; min-width: 0; border-right: 1px solid var(--line); background: var(--surface); }
+#list { height: 100%; overflow-y: auto; overflow-anchor: none; }
+#right { flex: 1; min-width: 0; overflow-y: auto; padding: 12px 14px 40px; }
+#pill {
+  position: absolute; z-index: 3; top: 8px; left: 50%; transform: translateX(-50%);
+  padding: 3px 12px; border: 0; border-radius: 12px; cursor: pointer;
+  background: #1f2937; color: #fff; font-weight: 600; box-shadow: 0 1px 4px rgb(0 0 0 / .3);
+}
+.empty { padding: 28px 16px; color: var(--ink-3); text-align: center; }
+@media (max-width: 820px) {
+  #panes { flex-direction: column; }
+  #left { flex: 0 0 38%; border-right: 0; border-bottom: 1px solid var(--line); }
+}
+
+/* Exchange rows */
+.row {
+  padding: 5px 10px 6px 8px; border-left: 4px solid transparent; border-bottom: 1px solid var(--line);
+  cursor: pointer; outline-offset: -2px;
+}
+.row:hover { background: #f9fafb; }
+.row.selected { background: #e0ecff; }
+.row.dim { opacity: .55; }
+.row.dim:hover, .row.dim.selected { opacity: 1; }
+.row.error, .row.toolerror { border-left-color: var(--bad); }
+.row.warning { border-left-color: var(--warn); }
+.line { display: flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap; }
+.line + .line { margin-top: 2px; color: var(--ink-2); font-size: 12px; }
+.num { font-weight: 600; font-variant-numeric: tabular-nums; }
+.time, .dur, .model, .out { color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.kind { font-weight: 600; font-size: 12px; }
+.model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.dur { margin-left: auto; }
+.preview { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.out { margin-left: auto; }
+.chip-tool { flex: none; padding: 0 5px; border-radius: 3px; background: #ffedd5; color: #9a3412; font-size: 11px; font-weight: 600; }
+.chip-err { flex: none; padding: 0 5px; border-radius: 3px; background: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 600; }
+.thread {
+  flex: none; min-width: 18px; padding: 0 4px; border-radius: 4px; text-align: center;
+  background: var(--thread, #d1d5db); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px;
+}
+.thread.none { color: var(--ink-2); }
+.badge {
+  flex: none; min-width: 32px; padding: 0 5px; border-radius: 4px; text-align: center;
+  color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; font-variant-numeric: tabular-nums;
+}
+.badge.good { background: var(--ok); }
+.badge.bad { background: var(--bad); }
+.badge.amber { background: var(--warn); }
+.badge.pulse { animation: pulse 1s ease-in-out infinite; }
+.spinner {
+  flex: none; width: 14px; height: 14px; margin: 0 9px; border-radius: 50%;
+  border: 2px solid #d1d5db; border-top-color: #2563eb; animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulse { 50% { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) { .badge.pulse, .spinner, .waiting { animation-duration: 4s; } }
+
+/* Summary */
+#summary { padding: 9px 12px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.sum-line { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 14px; min-height: 22px; }
+.sum-title { font-size: 15px; font-weight: 600; }
+.kv { color: var(--ink-3); }
+.kv b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Collapsible panels and folds */
+.fold-head {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0;
+  padding: 0; border: 0; background: none; cursor: pointer; text-align: left;
+}
+.caret { flex: none; width: 10px; color: var(--ink-3); font-size: 10px; transition: transform .1s; }
+.fold.open > .fold-head > .caret { transform: rotate(90deg); }
+.panel { margin-bottom: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.panel > .fold-head { padding: 7px 12px; font-weight: 600; font-size: 13px; }
+.panel > .fold-body { padding: 4px 12px 12px; }
+.tag {
+  flex: none; padding: 0 6px; border-radius: 9px; background: #e5e7eb; color: var(--ink-2);
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+}
+.tag.changed { background: #fef3c7; color: #92400e; }
+.tag.bad { background: #fee2e2; color: #b91c1c; }
+.sub { margin-top: 8px; border: 1px solid var(--line); border-radius: 5px; }
+.sub > .fold-head { padding: 5px 9px; font-weight: 600; }
+.sub > .fold-body { padding: 4px 9px 9px; }
+.ell { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; color: var(--ink-3); }
+.tool-line { padding: 3px 0; border-bottom: 1px solid #f3f4f6; }
+.tool-line > .fold-head { font-weight: 600; }
+.tool-line > .fold-body { padding: 4px 0 8px 16px; }
+.more > .fold-head { padding: 4px 0; color: var(--ink-2); font-weight: 600; }
+
+/* Messages and cards */
+.msg { margin-top: 10px; }
+.msg.assistant { margin-left: 24px; }
+.msg-head { margin-bottom: 3px; color: var(--ink-3); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.card {
+  --bar: #9ca3af; --bg: #f9fafb;
+  margin-top: 4px; padding: 6px 10px 7px; border-left: 4px solid var(--bar); border-radius: 3px; background: var(--bg);
+}
+.card.you { --bar: #2563eb; --bg: #eff6ff; }
+.card.injected { --bar: #9ca3af; --bg: #f9fafb; }
+.card.midsystem { --bar: #6b7280; --bg: #f3f4f6; }
+.card.model { --bar: #16a34a; --bg: #f0fdf4; }
+.card.thinking { --bar: #9333ea; --bg: #faf5ff; font-style: italic; }
+.card.call { --bar: #ea580c; --bg: #fff7ed; }
+.card.result { --bar: #0d9488; --bg: #f0fdfa; }
+.card.result-error, .card.reply-error { --bar: #dc2626; --bg: #fef2f2; }
+.card.note-warning { --bar: #b45309; --bg: #fffbeb; }
+.card.hit { outline: 1px solid var(--bar); outline-offset: 1px; }
+.card .card { margin-top: 6px; }
+.card-label {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  color: var(--bar); font-size: 11px; font-weight: 700; font-style: normal; letter-spacing: .04em; text-transform: uppercase;
+}
+.card.you .card-label { color: #1d4ed8; }
+.card.model .card-label { color: #15803d; }
+.card.call .card-label { color: #c2410c; }
+.card.result .card-label { color: #0f766e; }
+.card.injected .card-label, .card.unknown .card-label { color: var(--ink-3); }
+.card-label .name { text-transform: none; letter-spacing: 0; }
+.card-label .right { margin-left: auto; color: var(--ink-3); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.card-text { margin-top: 2px; }
+.card-text pre { font-family: inherit; font-size: 13px; }
+.card.result .card-text pre, .card.result-error .card-text pre, .mono pre { font-family: var(--mono); font-size: 12px; }
+.card.thinking pre { font-style: italic; }
+.call-summary { margin-top: 2px; font-family: var(--mono); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.call-desc { color: var(--ink-3); font-size: 12px; }
+.input-fold { margin-top: 3px; }
+.input-fold > .fold-head { color: var(--ink-3); font-size: 12px; }
+.input-fold > .fold-body { padding: 2px 0 0 4px; }
+.fold.card > .fold-head .ell { font-size: 12px; font-style: normal; }
+.fold.card > .fold-body { padding-top: 4px; }
+.stub { margin-top: 4px; color: var(--ink-3); font-size: 12px; }
+.slot { margin-left: 18px; }
+.waiting { margin-top: 5px; color: #0f766e; font-style: italic; animation: pulse 1.4s ease-in-out infinite; }
+.link { padding: 0; border: 0; background: none; color: #1d4ed8; font-size: 12px; text-decoration: underline; cursor: pointer; }
+.result-link { margin-top: 2px; }
+.loaded { margin-top: 3px; color: #0f766e; font-size: 11px; font-weight: 700; letter-spacing: .04em; }
+.part + .part { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #99f6e4; }
+.notice { margin: 6px 0; padding: 4px 9px; border-radius: 4px; background: #fef3c7; color: #92400e; font-weight: 600; }
+.notice.bad { background: #fee2e2; color: #b91c1c; }
+.muted { color: var(--ink-3); }
+.long-tools { display: flex; gap: 12px; margin-top: 3px; }
+
+/* JSON tree */
+.jt { font-family: var(--mono); font-size: 12px; }
+.jt-row { display: flex; gap: 6px; align-items: baseline; }
+.jt-row > .val { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.jt-kids { padding-left: 16px; }
+.jt > .fold-head { font: inherit; }
+.key { flex: none; color: #6b7280; }
+.key.changed { padding: 0 3px; border-radius: 3px; background: #fef3c7; color: #92400e; font-weight: 700; }
+.v-str { color: #047857; }
+.v-num { color: #1d4ed8; }
+.v-bool { color: #9333ea; }
+.v-null { color: #9ca3af; }
+.jt-count { color: #9ca3af; }
+
+table.headers { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+table.headers td { padding: 1px 8px 1px 0; vertical-align: top; overflow-wrap: anywhere; }
+table.headers td:first-child { width: 30%; color: var(--ink-3); }
+.h-title { margin: 8px 0 3px; font-weight: 600; }
+.diff-add { background: #dcfce7; }
+.diff-del { background: #fee2e2; }
+</style>
+</head>
+<body>
+<header id="top">
+  <div id="conn"><span id="dot"></span><span id="conn-text">connecting…</span></div>
+  <div class="stat"><b id="t-requests">0</b><span>requests</span></div>
+  <div class="stat"><b id="t-errors">0</b><span>errors</span></div>
+  <div class="stat"><b id="t-input">0 / 0 / 0</b><span>input: fresh / cache write / cache read</span></div>
+  <div class="stat"><b id="t-output">0</b><span>output tokens</span></div>
+  <div class="stat"><b id="t-tools">0</b><span>tool calls</span></div>
+  <div id="controls">
+    <select id="tool-filter" aria-label="Tool filter"><option value="">all tools</option></select>
+    <label><input type="checkbox" id="errors-only"> Errors only</label>
+    <label><input type="checkbox" id="hide-side"> Hide side calls</label>
+    <label><input type="checkbox" id="follow" checked> Follow newest</label>
+  </div>
+</header>
+<div id="panes">
+  <section id="left" aria-label="Exchanges">
+    <button id="pill" hidden></button>
+    <div id="list"></div>
+  </section>
+  <main id="right" aria-label="Details"></main>
+</div>
+
+<script>
+'use strict';
+// All data reaches the DOM through textContent and createElement. Tool results
+// hold arbitrary HTML and code: it must show as text, never run.
+
+const MAX_EXCHANGES = 500;   // same as the proxy's store
+const THREAD_COLORS = ['#2563eb', '#0f766e', '#b45309', '#be185d', '#475569']; // blue, teal, amber, pink, slate
+const CLAMP_LINES = 15, CLAMP_CHARS = 1200;
+
+const $ = id => document.getElementById(id);
+
+function el(tag, props, ...kids) {
+  const node = document.createElement(tag);
+  for (const [name, value] of Object.entries(props || {})) {
+    if (value === undefined || value === null || value === false) continue;
+    if (name === 'class') node.className = value;
+    else if (name === 'text') node.textContent = value;
+    else if (name.startsWith('on')) node[name] = value;
+    else node.setAttribute(name, value === true ? '' : value);
+  }
+  for (const kid of kids.flat(Infinity)) if (kid !== null && kid !== undefined && kid !== false) node.append(kid);
+  return node;
+}
+
+const isObject = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const fmtInt = n => Number(n || 0).toLocaleString('en-US');
+const fmtTokens = n => n < 1000 ? String(n) : n < 1e6 ? (n / 1e3).toFixed(1) + 'k' : (n / 1e6).toFixed(2) + 'M';
+const fmtMs = ms => ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(1) + ' s';
+const fmtTime = t => new Date(t).toTimeString().slice(0, 8);
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+// --- State -------------------------------------------------------------------
+
+const store = {
+  exchanges: new Map(),   // id -> exchange, oldest first
+  threads: new Map(),     // key -> thread
+  mainThreads: 0,
+  tools: new Map(),       // tool_use_id -> {name, input, callExchangeId, resultExchangeId, resultBlock}
+  toolNames: new Set(),
+  interned: new Map(),    // canonical JSON -> small id; one copy of each distinct message
+  seenMessages: new Set(),
+};
+const view = {
+  selected: null, shown: null, follow: true, errorsOnly: false, hideSide: false, tool: '',
+  newRows: [], dirtyRows: new Set(), pairsChanged: false, filterChanged: false, rebuild: false,
+  newCount: 0, optionCount: 0,
+};
+const openState = new Map(); // fold key -> open? Survives re-rendering, so a stream can't close what you opened.
+
+function clearStore() {
+  store.exchanges.clear(); store.threads.clear(); store.tools.clear(); store.toolNames.clear();
+  store.interned.clear(); store.seenMessages.clear(); store.mainThreads = 0;
+  view.newRows = []; view.dirtyRows.clear(); view.newCount = 0; view.shown = null; view.rebuild = true;
+  $('list').replaceChildren();
+  $('list').scrollTop = 0;
+}
+
+// --- Normalizing (5.2) ---------------------------------------------------------
+
+function canon(value) { // JSON with sorted keys and no cache_control
+  if (Array.isArray(value)) return '[' + value.map(canon).join(',') + ']';
+  if (isObject(value)) {
+    return '{' + Object.keys(value).filter(k => k !== 'cache_control').sort()
+      .map(k => JSON.stringify(k) + ':' + canon(value[k])).join(',') + '}';
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+const blocksOf = message => typeof message?.content === 'string'
+  ? [{ type: 'text', text: message.content }]
+  : Array.isArray(message?.content) ? message.content : [];
+
+const normalized = message => canon({ ...message, content: blocksOf(message) });
+
+function intern(text) {
+  let id = store.interned.get(text);
+  if (id === undefined) store.interned.set(text, id = store.interned.size);
+  return id;
+}
+
+function systemBlocks(system) {
+  if (typeof system === 'string') return [{ type: 'text', text: system }];
+  return Array.isArray(system) ? system : [];
+}
+
+function header(pairs, name) {
+  const found = (pairs || []).find(([key]) => key.toLowerCase() === name);
+  return found ? found[1] : '';
+}
+
+// --- Kinds and threads (5.1) ---------------------------------------------------
+
+function classify(ex) {
+  const body = ex.json;
+  if (ex.method !== 'POST' || !ex.path.startsWith('/v1/messages')) return ['probe', 'probe'];
+  if (body?.max_tokens === 1) return ['probe', 'probe: quota'];
+  if (!Array.isArray(body?.tools) || body.tools.length === 0) {
+    const properties = body?.output_config?.format?.schema?.properties;
+    const name = isObject(properties) ? Object.keys(properties)[0] : null;
+    return ['side', name ? `side: ${name}` : 'side'];
+  }
+  return ['main', ''];
+}
+
+const threadLetter = n => (n >= 26 ? threadLetter(Math.floor(n / 26) - 1) : '') + String.fromCharCode(65 + n % 26);
+
+function findThread(ex) {
+  const messages = ex.messages;
+  if (!messages) return null;
+  const lastSystem = systemBlocks(ex.json.system).at(-1)?.text ?? '';
+  const firstUser = messages.find(m => m?.role === 'user');
+  const key = [header(ex.headers, 'x-claude-code-session-id'), String(lastSystem).slice(0, 300),
+    firstUser ? normalized(firstUser).slice(0, 300) : ''].join('\0');
+  let thread = store.threads.get(key);
+  if (!thread) store.threads.set(key, thread = { letter: null, color: null, last: null });
+  // Letters go to threads with a main request, so the agent's conversation is
+  // `A` even though its probes and title call usually arrive first.
+  if (ex.kind === 'main' && !thread.letter) {
+    thread.color = THREAD_COLORS[store.mainThreads % THREAD_COLORS.length];
+    thread.letter = threadLetter(store.mainThreads++);
+    for (const other of store.exchanges.values()) if (other.thread === thread) view.dirtyRows.add(other);
+  }
+  return thread;
+}
+
+// --- Changes since the previous request (5.3) ----------------------------------
+
+function compareWithPrevious(ex, prev) {
+  const ids = ex.messageIds;
+  if (prev) {
+    let common = 0;
+    while (common < ids.length && common < prev.messageIds.length && ids[common] === prev.messageIds[common]) common++;
+    ex.newStart = common;
+    if (common < prev.messageIds.length) ex.historyChangedAt = common;
+  } else {
+    // With nothing to compare to: the last user message, a system message right
+    // before it, and whatever follows it (the agent can put a system message there).
+    let start = ex.messages.findLastIndex(m => m?.role === 'user');
+    if (start > 0 && ex.messages[start - 1]?.role === 'system') start--;
+    ex.newStart = Math.max(start, 0);
+  }
+
+  ex.systemId = intern(canon(systemBlocks(ex.json.system)));
+  ex.toolIds = new Map((Array.isArray(ex.json.tools) ? ex.json.tools : []).map(t => [t?.name, intern(canon(t))]));
+  if (!prev) return;
+  ex.systemChanged = ex.systemId !== prev.systemId;
+  ex.toolDiff = { added: [], removed: [], changed: [] };
+  for (const [name, id] of ex.toolIds) {
+    if (!prev.toolIds.has(name)) ex.toolDiff.added.push(name);
+    else if (prev.toolIds.get(name) !== id) ex.toolDiff.changed.push(name);
+  }
+  for (const name of prev.toolIds.keys()) if (!ex.toolIds.has(name)) ex.toolDiff.removed.push(name);
+  ex.changedParams = new Set();
+  const skip = new Set(['messages', 'system', 'tools']);
+  for (const key of new Set([...Object.keys(ex.json), ...Object.keys(prev.json)])) {
+    if (!skip.has(key) && canon(ex.json[key]) !== canon(prev.json[key])) ex.changedParams.add(key);
+  }
+}
+
+// --- Tool call and result pairing (5.4) ----------------------------------------
+
+function toolEntry(id) {
+  let entry = store.tools.get(id);
+  if (!entry) {
+    store.tools.set(id, entry = { name: null, input: null, callExchangeId: null, resultExchangeId: null, resultBlock: null });
+  }
+  return entry;
+}
+
+function noteCall(block, exchangeId) {
+  const entry = toolEntry(block.id);
+  entry.name = block.name;
+  entry.input = block.input;
+  entry.callExchangeId ??= exchangeId;
+  store.toolNames.add(block.name);
+  view.pairsChanged = true;
+}
+
+function indexMessages(ex) {
+  ex.messages.forEach((message, i) => {
+    if (store.seenMessages.has(ex.messageIds[i])) return; // already indexed, from an earlier request
+    store.seenMessages.add(ex.messageIds[i]);
+    for (const block of blocksOf(message)) {
+      if (block?.type === 'tool_use') noteCall(block, ex.id);
+      if (block?.type === 'tool_result') {
+        const entry = toolEntry(block.tool_use_id);
+        if (entry.resultExchangeId === null) {
+          entry.resultExchangeId = ex.id;
+          entry.resultBlock = block;
+          view.pairsChanged = true;
+        }
+      }
+    }
+  });
+}
+
+// --- Rebuilding the reply (3.5, 5.5) -------------------------------------------
+
+function feedStream(ex, text) {
+  ex.buffer += text;
+  let newline;
+  while ((newline = ex.buffer.indexOf('\n')) >= 0) {
+    streamLine(ex, ex.buffer.slice(0, newline));
+    ex.buffer = ex.buffer.slice(newline + 1);
+  }
+}
+
+function streamLine(ex, rawLine) {
+  const line = rawLine.trim(); // real streams have trailing spaces
+  if (line === '') {
+    if (ex.eventData.length) {
+      const data = ex.eventData.join('\n');
+      ex.eventData = [];
+      try {
+        applyEvent(ex, JSON.parse(data), ex.eventName);
+      } catch (err) {
+        if (!ex.finishing) ex.warnings.push(`could not read a stream event: ${err.message}`); // a last event can be cut off
+      }
+    }
+    ex.eventName = '';
+  } else if (line.startsWith('event:')) ex.eventName = line.slice(6).trim();
+  else if (line.startsWith('data:')) ex.eventData.push(line.slice(5).trim());
+}
+
+function blockAt(ex, index) {
+  return ex.blocks[index] ??= { type: 'text', text: '' };
+}
+
+function closeBlock(block) {
+  block.open = false;
+  if (block.type !== 'tool_use' || block.partial === '') return;
+  try {
+    block.input = JSON.parse(block.partial);
+    block.partial = '';
+    toolEntry(block.id).input = block.input;
+  } catch {
+    block.badInput = true;
+  }
+}
+
+function applyEvent(ex, data, eventName) {
+  switch (data.type || eventName) {
+    case 'message_start':
+      ex.messageId = data.message?.id;
+      ex.replyModel = data.message?.model;
+      Object.assign(ex.usage, data.message?.usage);
+      break;
+    case 'content_block_start': {
+      const block = { ...data.content_block, open: true, partial: '' };
+      ex.blocks[data.index] = block;
+      if (block.type === 'tool_use') noteCall(block, ex.id);
+      break;
+    }
+    case 'content_block_delta': {
+      const block = blockAt(ex, data.index), delta = data.delta || {};
+      if (delta.type === 'text_delta') block.text = (block.text || '') + delta.text;
+      else if (delta.type === 'thinking_delta') block.thinking = (block.thinking || '') + delta.thinking;
+      else if (delta.type === 'signature_delta') block.signed = true;
+      else if (delta.type === 'input_json_delta') block.partial = (block.partial || '') + delta.partial_json;
+      break;
+    }
+    case 'content_block_stop':
+      closeBlock(blockAt(ex, data.index));
+      break;
+    case 'message_delta':
+      ex.stopReason = data.delta?.stop_reason ?? ex.stopReason;
+      for (const [key, value] of Object.entries(data.usage || {})) if (value !== null) ex.usage[key] = value;
+      break;
+    case 'message_stop':
+      ex.complete = true;
+      break;
+    case 'error':
+      ex.replyError = { ...data.error, request_id: data.request_id };
+      break;
+    // ping and anything new: nothing to do
+  }
+}
+
+function finishReply(ex) {
+  if (ex.isStream) {
+    ex.finishing = true;
+    feedStream(ex, '\n\n'); // a last event with no blank line after it
+    for (const block of ex.blocks) if (block?.open && block.type === 'tool_use') block.cutOff = true;
+    return;
+  }
+  if (!ex.raw) return;
+  try {
+    const reply = JSON.parse(ex.raw);
+    if (reply?.type === 'error') ex.replyError = { ...reply.error, request_id: reply.request_id };
+    else if (reply?.type === 'message') {
+      ex.blocks = Array.isArray(reply.content) ? reply.content : [];
+      ex.replyModel = reply.model;
+      ex.stopReason = reply.stop_reason;
+      ex.complete = true;
+      Object.assign(ex.usage, reply.usage);
+      for (const block of ex.blocks) if (block?.type === 'tool_use') noteCall(block, ex.id);
+    }
+  } catch { /* not JSON: shown as text */ }
+}
+
+// --- Events from the proxy (4.2) -----------------------------------------------
+
+function onRequest(event) {
+  const ex = {
+    id: event.id, t: event.t, method: event.method, path: event.path, headers: event.headers,
+    body: event.body, json: event.body_json,
+    status: null, reason: '', responseHeaders: [], tStart: null, tEnd: null, ok: null, endError: null,
+    raw: '', buffer: '', eventName: '', eventData: [], isStream: false,
+    blocks: [], usage: {}, complete: false, stopReason: null, replyError: null, replyModel: null, warnings: [],
+    newStart: 0, historyChangedAt: null, newResultIds: [], newHasError: false, version: 0,
+  };
+  [ex.kind, ex.label] = classify(ex);
+  ex.messages = Array.isArray(ex.json?.messages) ? ex.json.messages : null;
+  ex.thread = findThread(ex);
+  if (ex.messages) {
+    ex.messageIds = ex.messages.map(m => intern(normalized(m)));
+    const prev = ex.thread.last;
+    ex.prevId = prev?.id ?? null;
+    compareWithPrevious(ex, prev);
+    ex.thread.last = ex;
+    indexMessages(ex);
+    for (const message of ex.messages.slice(ex.newStart)) {
+      for (const block of blocksOf(message)) {
+        if (block?.type !== 'tool_result') continue;
+        ex.newResultIds.push(block.tool_use_id);
+        if (block.is_error) ex.newHasError = true;
+      }
+    }
+  }
+  store.exchanges.set(ex.id, ex);
+  view.newRows.push(ex);
+  while (store.exchanges.size > MAX_EXCHANGES) {
+    const [oldId, old] = store.exchanges.entries().next().value;
+    store.exchanges.delete(oldId);
+    old.row?.remove();
+  }
+}
+
+function onEvent(event) {
+  if (event.type === 'reset') { clearStore(); return; }
+  if (event.type === 'request') { onRequest(event); return; }
+  const ex = store.exchanges.get(event.id);
+  if (!ex) return; // older than anything still kept
+  ex.version++;
+  view.dirtyRows.add(ex);
+  if (event.type === 'response_start') {
+    ex.status = event.status;
+    ex.reason = event.reason;
+    ex.responseHeaders = event.headers;
+    ex.tStart = event.t;
+    ex.isStream = header(event.headers, 'content-type').includes('text/event-stream');
+  } else if (event.type === 'response_chunk') {
+    ex.raw += event.text;
+    if (ex.isStream) feedStream(ex, event.text);
+  } else if (event.type === 'response_end') {
+    ex.tEnd = event.t;
+    ex.ok = event.ok;
+    ex.endError = event.error;
+    finishReply(ex);
+  }
+}
+
+// --- What counts as a problem (6.5) --------------------------------------------
+
+function problem(ex) {
+  const finished = ex.tEnd !== null;
+  if (ex.status >= 400 || ex.ok === false || ex.replyError) return 'error';
+  if (finished && ex.isStream && !ex.complete) return 'error';
+  if (ex.stopReason === 'max_tokens') return 'warning';
+  if (ex.newHasError) return 'toolerror';
+  return null;
+}
+
+function replyTools(ex) {
+  return ex.blocks.filter(block => block?.type === 'tool_use').map(block => block.name);
+}
+
+function isVisible(ex) {
+  if (view.hideSide && ex.kind !== 'main') return false;
+  if (view.errorsOnly && !problem(ex)) return false;
+  if (view.tool && !replyTools(ex).includes(view.tool)
+      && !ex.newResultIds.some(id => store.tools.get(id)?.name === view.tool)) return false;
+  return true;
+}
+
+// --- Exchange rows (6.2) -------------------------------------------------------
+
+function threadChip(ex) {
+  const letter = ex.thread?.letter;
+  return el('span', { class: 'thread' + (letter ? '' : ' none'), text: letter || '–',
+    style: letter ? `--thread:${ex.thread.color}` : null,
+    title: letter ? `thread ${letter}` : 'not part of a main thread' });
+}
+
+function statusBadge(ex) {
+  const level = problem(ex);
+  if (ex.status === null && ex.tEnd === null) return el('span', { class: 'spinner', title: 'pending' });
+  const failed = level === 'error';
+  const text = failed && !(ex.status >= 400) ? '!' : String(ex.status ?? '!');
+  const color = failed ? 'bad' : level === 'warning' ? 'amber' : 'good';
+  return el('span', { class: `badge ${color}${ex.tEnd === null ? ' pulse' : ''}`, text });
+}
+
+function replyPreview(ex) {
+  const error = errorInfo(ex);
+  if (error) return error.type || error.message || 'error';
+  const text = ex.blocks.find(block => block?.type === 'text' && block.text)?.text ?? (ex.isStream ? '' : ex.raw);
+  return text.replace(/\s+/g, ' ').trim().slice(0, 70);
+}
+
+function toolChips(ex) {
+  const counts = new Map();
+  for (const name of replyTools(ex)) counts.set(name, (counts.get(name) || 0) + 1);
+  return [...counts].map(([name, n]) => el('span', { class: 'chip-tool', text: n > 1 ? `${name} ×${n}` : name }));
+}
+
+function drawRow(ex) {
+  const row = ex.row ??= el('div', {
+    tabindex: '0', role: 'button',
+    onclick: () => select(ex.id),
+    onkeydown: e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(ex.id); } },
+  });
+  const level = problem(ex);
+  row.className = ['row', ex.kind !== 'main' && 'dim', level, ex.id === view.shown && 'selected'].filter(Boolean).join(' ');
+  const model = ex.replyModel || ex.json?.model || '';
+  const line1 = el('div', { class: 'line' },
+    el('span', { class: 'num', text: `#${ex.id}` }),
+    el('span', { class: 'time', text: fmtTime(ex.t) }),
+    threadChip(ex),
+    ex.label && el('span', { class: 'kind', text: ex.label }),
+    statusBadge(ex),
+    el('span', { class: 'model', text: model, title: model }),
+    el('span', { class: 'dur', text: ex.tEnd !== null ? fmtMs(ex.tEnd - ex.t) : '' }));
+  const preview = replyPreview(ex);
+  const chips = toolChips(ex);
+  const line2 = el('div', { class: 'line' },
+    ex.messages && el('span', { text: `+${plural(ex.messages.length - ex.newStart, 'msg')}` }),
+    (chips.length || preview) && el('span', { text: '→' }),
+    chips,
+    level === 'toolerror' && el('span', { class: 'chip-err', text: 'tool error' }),
+    el('span', { class: 'preview', text: preview, title: preview }),
+    ex.usage.output_tokens !== undefined && el('span', { class: 'out', text: `${fmtTokens(ex.usage.output_tokens)} out` }));
+  row.replaceChildren(line1, line2);
+  return row;
+}
+
+// --- Text and JSON pieces (6.4) ------------------------------------------------
+
+function copyButton(text) {
+  return el('button', { class: 'link', text: 'copy', onclick: async e => {
+    const button = e.currentTarget;
+    e.stopPropagation();
+    try { await navigator.clipboard.writeText(text); button.textContent = 'copied'; }
+    catch { button.textContent = 'copy failed'; }
+    setTimeout(() => { button.textContent = 'copy'; }, 1200);
+  } });
+}
+
+function clampText(text) {
+  const lines = text.split('\n');
+  const head = lines.slice(0, CLAMP_LINES).join('\n').slice(0, CLAMP_CHARS);
+  return { lineCount: lines.length, long: lines.length > CLAMP_LINES || text.length > CLAMP_CHARS, head };
+}
+
+function longText(text, key) {
+  const { lineCount, long, head } = clampText(text);
+  if (!long) return el('pre', { text });
+  const pre = el('pre');
+  const toggle = el('button', { class: 'link', onclick: e => {
+    e.stopPropagation();
+    openState.set(key, !openState.get(key));
+    draw();
+  } });
+  const draw = () => {
+    const open = openState.get(key);
+    pre.textContent = open ? text : head + ' …';
+    toggle.textContent = open ? 'show less' : `show all (${fmtInt(lineCount)} lines, ${fmtInt(text.length)} chars)`;
+  };
+  draw();
+  return el('div', {}, pre, el('div', { class: 'long-tools' }, toggle, copyButton(text)));
+}
+
+// A section that builds its content only when opened: one main request is
+// hundreds of KB, and most of it is never looked at.
+function fold(key, startOpen, classes, head, build) {
+  const isOpen = () => openState.has(key) ? openState.get(key) : startOpen;
+  const caret = el('span', { class: 'caret', text: '▶' });
+  const headSlot = el('button', { class: 'fold-head', type: 'button' });
+  const body = el('div', { class: 'fold-body' });
+  const root = el('div', { class: `fold ${classes}` }, headSlot, body);
+  let built = false;
+  const fill = () => {
+    built = true;
+    body.replaceChildren(...[safely(build, null)].flat(Infinity).filter(Boolean));
+  };
+  const drawHead = () => headSlot.replaceChildren(caret, ...[typeof head === 'function' ? head() : head].flat(Infinity).filter(Boolean));
+  const sync = () => {
+    const open = isOpen();
+    root.classList.toggle('open', open);
+    headSlot.setAttribute('aria-expanded', open);
+    body.hidden = !open;
+    if (open && !built) { fill(); markToolCards(); }
+  };
+  headSlot.onclick = () => { openState.set(key, !isOpen()); sync(); };
+  root.refresh = () => {
+    drawHead();
+    if (isOpen()) fill(); else built = false;
+  };
+  drawHead();
+  sync();
+  return root;
+}
+
+function jsonValue(value) {
+  if (typeof value === 'string') return el('span', { class: 'val v-str', text: JSON.stringify(value) });
+  if (typeof value === 'number') return el('span', { class: 'val v-num', text: String(value) });
+  if (typeof value === 'boolean') return el('span', { class: 'val v-bool', text: String(value) });
+  return el('span', { class: 'val v-null', text: 'null' });
+}
+
+function jsonTree(value, key, depth = 0, label = null, changed = null) {
+  const keyNode = label !== null && el('span', { class: 'key' + (changed?.has(label) ? ' changed' : ''), text: `${label}:` });
+  const isArray = Array.isArray(value);
+  if (!isArray && !isObject(value)) {
+    if (typeof value === 'string' && clampText(value).long) {
+      return el('div', { class: 'jt jt-row' }, keyNode, el('div', { class: 'val v-str' }, longText(value, key)));
+    }
+    return el('div', { class: 'jt jt-row' }, keyNode, jsonValue(value));
+  }
+  const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
+  const count = isArray ? `[${plural(entries.length, 'item')}]` : `{${plural(entries.length, 'key')}}`;
+  if (entries.length === 0) {
+    return el('div', { class: 'jt jt-row' }, keyNode, el('span', { class: 'jt-count', text: isArray ? '[]' : '{}' }));
+  }
+  return fold(key, depth < 2, 'jt', [keyNode, el('span', { class: 'jt-count', text: count })],
+    () => el('div', { class: 'jt-kids' },
+      entries.map(([k, v]) => jsonTree(v, `${key}/${k}`, depth + 1, String(k), depth === 0 ? changed : null))));
+}
+
+// --- Cards (6.4) ---------------------------------------------------------------
+
+function cardLabel(icon, label, name, right) {
+  return el('div', { class: 'card-label' },
+    el('span', { text: icon }), el('span', { text: label }),
+    name && el('span', { class: 'name', text: name }),
+    right && el('span', { class: 'right', text: right }));
+}
+
+function card(classes, label, ...kids) {
+  return el('div', { class: `card ${classes}` }, label, kids);
+}
+
+function collapsedCard(key, classes, icon, label, text) {
+  const firstLine = text.replace(/<\/?system-reminder>/g, '').split('\n').find(line => line.trim()) ?? '';
+  return fold(key, false, `card ${classes}`,
+    [cardLabel(icon, label), el('span', { class: 'ell', text: firstLine.slice(0, 160) }),
+      el('span', { class: 'tag', text: `${fmtInt(text.length)} chars` })],
+    () => el('div', { class: 'mono' }, longText(text, `${key}/text`)));
+}
+
+function unknownCard(block, key) {
+  const type = isObject(block) && typeof block.type === 'string' ? block.type : typeof block;
+  return card('unknown', cardLabel('?', '', type), jsonTree(block, `${key}/json`));
+}
+
+function callSummary(name, input) {
+  if (!isObject(input)) return '';
+  const field = { Bash: 'command', Read: 'file_path', Edit: 'file_path', Write: 'file_path', Grep: 'pattern', Glob: 'pattern' }[name];
+  if (field && typeof input[field] === 'string') return input[field];
+  return Object.values(input).find(value => typeof value === 'string') ?? '';
+}
+
+function resultParts(content, key) {
+  if (typeof content === 'string') return [el('div', { class: 'card-text' }, longText(content, key))];
+  if (!Array.isArray(content)) return [content === undefined || content === null ? el('div', { class: 'muted', text: '(empty)' }) : jsonTree(content, key)];
+  return content.map((part, i) => {
+    const partKey = `${key}/${i}`;
+    if (part?.type === 'text') return el('div', { class: 'part card-text' }, longText(String(part.text), partKey));
+    if (part?.type === 'tool_reference') return el('div', { class: 'part loaded', text: `LOADED TOOL: ${part.tool_name}` });
+    return el('div', { class: 'part' }, jsonTree(part, partKey));
+  });
+}
+
+function resultLength(content) {
+  if (typeof content === 'string') return content.length;
+  if (Array.isArray(content)) return content.reduce((sum, part) => sum + (typeof part?.text === 'string' ? part.text.length : 0), 0);
+  return 0;
+}
+
+function resultCard(block, key) {
+  const name = store.tools.get(block.tool_use_id)?.name ?? 'unknown tool';
+  const node = card(block.is_error ? 'result-error' : 'result',
+    cardLabel(block.is_error ? '✕' : '↩', block.is_error ? 'Error result ·' : 'Result ·', name,
+      `${fmtInt(resultLength(block.content))} chars`),
+    resultParts(block.content, key));
+  node.dataset.tool = name;
+  return node;
+}
+
+function fillSlot(slot, id, block) {
+  const entry = store.tools.get(id);
+  if (entry?.resultBlock) {
+    delete slot.dataset.waiting;
+    slot.replaceChildren(resultCard(entry.resultBlock, `result/${id}`),
+      el('div', { class: 'result-link' },
+        el('button', { class: 'link', text: `result in #${entry.resultExchangeId}`, onclick: () => select(entry.resultExchangeId, true) })));
+  } else if (block.cutOff) {
+    slot.replaceChildren(el('div', { class: 'stub', text: 'no result: the reply broke off during this call' }));
+  } else {
+    slot.dataset.waiting = id;
+    slot.replaceChildren(el('div', { class: 'waiting', text: 'waiting for result…' }));
+  }
+}
+
+function toolCard(block, key) {
+  const input = block.input;
+  const summary = callSummary(block.name, input);
+  const description = isObject(input) && typeof input.description === 'string' ? input.description : '';
+  const slot = el('div', { class: 'slot' });
+  slot.block = block;
+  fillSlot(slot, block.id, block);
+  const count = isObject(input) ? plural(Object.keys(input).length, 'key') : '';
+  const node = el('div', {},
+    card('call', cardLabel('▶', 'Tool call ·', block.name),
+      summary && el('div', { class: 'call-summary', text: summary }),
+      description && el('div', { class: 'call-desc', text: description }),
+      block.badInput && el('div', { class: 'notice', text: 'tool input is not valid JSON; showing it as received' }),
+      block.partial
+        ? el('pre', { text: block.partial })
+        : fold(`${key}/input`, false, 'input-fold', [el('span', { text: `input (${count})` })],
+          () => jsonTree(input, `${key}/tree`))),
+    slot);
+  node.firstChild.dataset.tool = block.name;
+  return node;
+}
+
+function textCard(block, role, key, siblings) {
+  const text = String(block.text ?? '');
+  if (role === 'system') return collapsedCard(key, 'midsystem', '§', 'System (mid-conversation)', text);
+  if (role === 'assistant') return card('model', cardLabel('◆', 'Model'), el('div', { class: 'card-text' }, longText(text, key)));
+  // Text beside a tool_result comes from the agent ("Tool loaded."), like reminders do.
+  const fromAgent = text.trimStart().startsWith('<system-reminder>') || siblings.some(b => b?.type === 'tool_result');
+  if (fromAgent) return collapsedCard(key, 'injected', '⋯', 'Injected context', text);
+  return card('you', cardLabel('✎', 'You'), el('div', { class: 'card-text' }, longText(text, key)));
+}
+
+function blockCard(block, role, key, shownCalls, siblings) {
+  switch (block?.type) {
+    case 'text': return textCard(block, role, key, siblings);
+    case 'thinking':
+      return card('thinking', cardLabel('∴', 'Thinking'), block.thinking
+        ? el('div', { class: 'card-text' }, longText(block.thinking, key))
+        : el('div', { class: 'muted', text: 'hidden (signature only)' }));
+    case 'tool_use': return toolCard(block, key);
+    case 'tool_result':
+      if (shownCalls.has(block.tool_use_id)) {
+        const name = store.tools.get(block.tool_use_id)?.name ?? 'tool';
+        return el('div', { class: 'stub', text: `↳ result of ${name}, shown with its call` });
+      }
+      return resultCard(block, key);
+    case 'tool_addition': {
+      const definition = block.tool?.definition;
+      return fold(key, false, 'card midsystem', cardLabel('+', 'Tool added:', definition?.name ?? '?'),
+        () => jsonTree(definition ?? block, `${key}/json`));
+    }
+    default: return unknownCard(block, key);
+  }
+}
+
+function safely(build, fallback) {
+  try {
+    return build();
+  } catch (err) {
+    console.error(err);
+    return fallback ?? el('div', { class: 'notice bad', text: `could not show this: ${err.message}` });
+  }
+}
+
+function messageCards(message, index, keyBase, shownCalls) {
+  const role = String(message?.role ?? 'unknown');
+  const blocks = blocksOf(message);
+  const key = `${keyBase}/m${index}`;
+  return el('div', { class: `msg ${role}` },
+    el('div', { class: 'msg-head', text: `#${index} · ${role}` }),
+    Array.isArray(message?.content) || typeof message?.content === 'string'
+      ? blocks.map((block, i) => safely(() => blockCard(block, role, `${key}/b${i}`, shownCalls, blocks), unknownCard(block, `${key}/b${i}`)))
+      : unknownCard(message, key));
+}
+
+function callIds(messages) {
+  const ids = new Set();
+  for (const message of messages) {
+    for (const block of blocksOf(message)) if (block?.type === 'tool_use') ids.add(block.id);
+  }
+  return ids;
+}
+
+// --- Detail pane (6.3) ---------------------------------------------------------
+
+function kv(label, value) {
+  return el('span', { class: 'kv' }, `${label} `, el('b', { text: value }));
+}
+
+function errorInfo(ex) {
+  if (ex.replyError) return ex.replyError;
+  if (ex.ok === false) return { type: ex.status >= 400 ? `HTTP ${ex.status}` : 'connection', message: ex.endError };
+  if (ex.status >= 400) return { type: `HTTP ${ex.status}`, message: ex.reason };
+  return null;
+}
+
+function drawSummary(ex) {
+  const use = ex.usage;
+  const fresh = use.input_tokens ?? 0, write = use.cache_creation_input_tokens ?? 0, read = use.cache_read_input_tokens ?? 0;
+  const hasUsage = use.input_tokens !== undefined;
+  const summary = el('div', { id: 'summary' },
+    el('div', { class: 'sum-line' },
+      el('span', { class: 'sum-title', text: `#${ex.id}` }), threadChip(ex),
+      el('span', { class: 'kind', text: ex.label || 'main' }), statusBadge(ex),
+      el('span', { class: 'model', text: ex.replyModel || ex.json?.model || '' }),
+      ex.stopReason && kv('stop', ex.stopReason),
+      el('span', { class: 'muted', text: `${ex.method} ${ex.path}` })),
+    el('div', { class: 'sum-line' },
+      kv('total', ex.tEnd !== null ? fmtMs(ex.tEnd - ex.t) : '…'),
+      kv('first byte', ex.tStart !== null ? fmtMs(ex.tStart - ex.t) : '…'),
+      kv('stream', ex.tEnd !== null && ex.tStart !== null ? fmtMs(ex.tEnd - ex.tStart) : '…')),
+    hasUsage && el('div', { class: 'sum-line' },
+      kv('input', fmtInt(fresh)), kv('cache write', fmtInt(write)), kv('cache read', fmtInt(read)),
+      kv('output', fmtInt(use.output_tokens)), kv('context', fmtInt(fresh + write + read))));
+  return summary;
+}
+
+function replyBody(ex) {
+  const nodes = [];
+  const error = errorInfo(ex);
+  if (ex.status === null && ex.tEnd === null) nodes.push(el('div', { class: 'muted', text: 'waiting for the reply…' }));
+  if (error) {
+    nodes.push(card('reply-error', cardLabel('✕', 'Error', error.type),
+      el('div', { class: 'card-text' }, longText(String(error.message ?? ''), `${ex.id}/error`)),
+      error.request_id && el('div', { class: 'call-desc', text: error.request_id })));
+  } else if (ex.tEnd !== null && ex.isStream && !ex.complete) {
+    nodes.push(el('div', { class: 'notice bad', text: 'the stream ended without message_stop' }));
+  }
+  if (ex.stopReason === 'max_tokens') nodes.push(el('div', { class: 'notice', text: 'stopped at max_tokens: the reply is cut off' }));
+  for (const warning of ex.warnings) nodes.push(el('div', { class: 'notice', text: warning }));
+  if (ex.blocks.length) {
+    nodes.push(el('div', { class: 'msg assistant' },
+      el('div', { class: 'msg-head', text: 'reply · assistant' }),
+      ex.blocks.filter(Boolean).map((block, i) => {
+        const key = `${ex.id}/reply/${i}`;
+        return safely(() => blockCard(block, 'assistant', key, new Set(), []), unknownCard(block, key));
+      })));
+  } else if (!ex.isStream && ex.raw && !error) {
+    nodes.push(card('unknown', cardLabel('≡', 'Text'), el('div', { class: 'mono' }, longText(ex.raw, `${ex.id}/plain`))));
+  } else if (ex.tEnd !== null && !error && !ex.raw) {
+    nodes.push(el('div', { class: 'muted', text: 'no body' }));
+  }
+  return nodes;
+}
+
+function diffLines(before, after) {
+  const a = before.split('\n'), b = after.split('\n');
+  let start = 0;
+  while (start < a.length && start < b.length && a[start] === b[start]) start++;
+  let endA = a.length, endB = b.length;
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB--; }
+  const x = a.slice(start, endA), y = b.slice(start, endB);
+  const rows = [];
+  if (x.length * y.length > 4e6) { // too big to align: everything between is replaced
+    return [...x.map(line => ['-', line]), ...y.map(line => ['+', line])];
+  }
+  const table = Array.from({ length: x.length + 1 }, () => new Uint32Array(y.length + 1));
+  for (let i = x.length - 1; i >= 0; i--) {
+    for (let j = y.length - 1; j >= 0; j--) {
+      table[i][j] = x[i] === y[j] ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  let i = 0, j = 0;
+  while (i < x.length || j < y.length) {
+    if (i < x.length && j < y.length && x[i] === y[j]) { rows.push([' ', x[i]]); i++; j++; }
+    else if (j < y.length && (i === x.length || table[i][j + 1] >= table[i + 1][j])) rows.push(['+', y[j++]]);
+    else rows.push(['-', x[i++]]);
+  }
+  return rows;
+}
+
+const systemText = ex => systemBlocks(ex.json.system).map(block => String(block?.text ?? '')).join('\n');
+
+function systemBody(ex) {
+  const blocks = systemBlocks(ex.json.system);
+  const prev = store.exchanges.get(ex.prevId);
+  return [
+    ex.systemChanged && (prev
+      ? fold(`${ex.id}/sysdiff`, false, 'sub', [el('span', { text: 'line diff against the previous request' })],
+        () => el('pre', {}, diffLines(systemText(prev), systemText(ex)).map(([mark, line]) =>
+          el('div', { class: mark === '+' ? 'diff-add' : mark === '-' ? 'diff-del' : '', text: `${mark} ${line}` }))))
+      : el('div', { class: 'muted', text: 'the previous request is no longer kept, so there is nothing to compare' })),
+    blocks.map((block, i) => {
+      const text = String(block?.text ?? '');
+      return fold(`${ex.id}/sys${i}`, true, 'sub',
+        [el('span', { text: `Block ${i + 1}` }), el('span', { class: 'tag', text: `${fmtInt(text.length)} chars` }),
+          block?.cache_control && el('span', { class: 'tag', text: 'cache' })],
+        () => [el('pre', { text }), el('div', { class: 'long-tools' }, copyButton(text))]);
+    }),
+  ];
+}
+
+function toolsBadge(ex) {
+  const count = ex.toolIds.size;
+  const diff = ex.toolDiff;
+  if (!diff) return el('span', { class: 'tag', text: 'first request' });
+  const parts = [...diff.added.map(n => `+${n}`), ...diff.removed.map(n => `−${n}`), ...diff.changed.map(n => `~${n}`)];
+  return parts.length ? el('span', { class: 'tag changed', text: parts.join(' ') })
+    : el('span', { class: 'tag', text: `unchanged (${count})` });
+}
+
+function toolsBody(ex) {
+  const tools = Array.isArray(ex.json.tools) ? ex.json.tools : [];
+  return tools.map((tool, i) => {
+    const description = String(tool?.description ?? '');
+    return fold(`${ex.id}/tool${i}`, false, 'tool-line',
+      [el('span', { text: String(tool?.name ?? '?') }), el('span', { class: 'ell', text: description.split('\n')[0] }),
+        tool?.defer_loading && el('span', { class: 'tag', text: 'deferred' })],
+      () => [longText(description, `${ex.id}/tool${i}/d`), jsonTree(tool?.input_schema ?? null, `${ex.id}/tool${i}/s`)]);
+  });
+}
+
+function headerTable(pairs) {
+  return el('table', { class: 'headers' }, el('tbody', {}, pairs.map(([name, value]) =>
+    el('tr', {}, el('td', { text: name }), el('td', { text: value })))));
+}
+
+function drawDetail(ex) {
+  const live = [];
+  const panel = (key, open, head, build, refreshes) => {
+    const node = fold(`panel/${key}`, open, 'panel', head, build);
+    if (refreshes) live.push(node);
+    return node;
+  };
+  const title = text => el('span', { text });
+  const hasMessages = Boolean(ex.messages);
+  const newMessages = hasMessages ? ex.messages.slice(ex.newStart) : [];
+
+  const sections = [
+    hasMessages && panel('new', true,
+      [title('New this turn'), el('span', { class: 'tag', text: plural(newMessages.length, 'msg') }),
+        ex.historyChangedAt !== null && el('span', { class: 'tag changed', text: 'history changed' })],
+      () => {
+        const shown = callIds(newMessages);
+        return [
+          ex.historyChangedAt !== null && el('div', { class: 'notice', text: `history changed at message #${ex.historyChangedAt}` }),
+          newMessages.length ? null : el('div', { class: 'muted', text: 'no new messages' }),
+          newMessages.map((message, i) => messageCards(message, ex.newStart + i, `${ex.id}/new`, shown)),
+        ];
+      }),
+    panel('reply', true,
+      () => {
+        const tools = replyTools(ex).length;
+        return [title('Reply'), tools ? el('span', { class: 'tag', text: plural(tools, 'tool call') }) : null,
+          problem(ex) === 'error' ? el('span', { class: 'tag bad', text: 'error' }) : null];
+      },
+      () => replyBody(ex), true),
+    hasMessages && panel('conversation', true,
+      title(`Conversation (${plural(ex.messages.length, 'message')})`),
+      () => {
+        const shown = callIds(ex.messages);
+        const earlier = ex.newStart;
+        return [
+          earlier > 0 && fold(`${ex.id}/earlier`, false, 'more', title(plural(earlier, 'earlier message')),
+            () => ex.messages.slice(0, earlier).map((message, i) => messageCards(message, i, `${ex.id}/conv`, shown))),
+          newMessages.map((message, i) => messageCards(message, ex.newStart + i, `${ex.id}/conv`, shown)),
+        ];
+      }),
+    hasMessages && panel('system', false,
+      () => {
+        const blocks = systemBlocks(ex.json.system);
+        const chars = blocks.reduce((sum, block) => sum + String(block?.text ?? '').length, 0);
+        return [title('System instructions'), el('span', { class: 'tag', text: plural(blocks.length, 'block') }),
+          el('span', { class: 'tag', text: `${fmtInt(chars)} chars` }),
+          ex.prevId === null ? el('span', { class: 'tag', text: 'first request' })
+            : el('span', { class: 'tag' + (ex.systemChanged ? ' changed' : ''), text: ex.systemChanged ? 'changed' : 'unchanged' })];
+      },
+      () => systemBody(ex)),
+    hasMessages && panel('tools', false, [title(`Tools (${ex.toolIds.size})`), toolsBadge(ex)], () => toolsBody(ex)),
+    panel('params', false,
+      () => {
+        const watched = ['model', 'max_tokens', 'thinking', 'output_config', 'context_management'];
+        const changed = watched.filter(key => ex.changedParams?.has(key));
+        return [title('Request parameters'), changed.length ? el('span', { class: 'tag changed', text: `changed: ${changed.join(', ')}` }) : null];
+      },
+      () => {
+        if (!isObject(ex.json)) return el('div', { class: 'muted', text: 'no JSON body' });
+        const { messages, system, tools, ...rest } = ex.json;
+        return jsonTree(rest, `${ex.id}/params`, 0, null, ex.changedParams);
+      }),
+    panel('headers', false, title('Headers'),
+      () => [el('div', { class: 'h-title', text: 'Request' }), headerTable(ex.headers),
+        el('div', { class: 'h-title', text: 'Response' }),
+        ex.status === null ? el('div', { class: 'muted', text: 'none yet' }) : headerTable(ex.responseHeaders)], true),
+    panel('raw', false, title('Raw'),
+      () => [
+        el('div', { class: 'h-title', text: 'Request' }),
+        ex.json !== null ? jsonTree(ex.json, `${ex.id}/raw`) : el('div', { class: 'mono' }, longText(ex.body || '(empty)', `${ex.id}/rawbody`)),
+        el('div', { class: 'h-title', text: 'Response' }),
+        el('div', { class: 'mono' }, longText(ex.raw || '(empty)', `${ex.id}/rawreply`)),
+      ], true),
+  ].filter(Boolean);
+
+  const summary = el('div', {}, drawSummary(ex));
+  $('right').replaceChildren(summary, ...sections);
+  return { summary, live };
+}
+
+let detail = null; // {id, version, summary, live}
+
+function renderDetail(ex) {
+  if (!ex) {
+    detail = null;
+    $('right').replaceChildren(el('div', { class: 'empty', text: 'Waiting for the first request from the agent…' }));
+    return;
+  }
+  if (!detail || detail.id !== ex.id || view.rebuild) {
+    const sameExchange = detail?.id === ex.id;
+    detail = { id: ex.id, version: ex.version, ...safely(() => drawDetail(ex), { summary: null, live: [] }) };
+    if (!sameExchange) $('right').scrollTop = 0;
+    markToolCards();
+  } else if (detail.version !== ex.version) {
+    detail.version = ex.version;
+    detail.summary?.replaceChildren(drawSummary(ex));
+    for (const node of detail.live) node.refresh();
+    markToolCards();
+  }
+}
+
+function refreshWaitingCalls() {
+  for (const slot of $('right').querySelectorAll('.slot[data-waiting]')) fillSlot(slot, slot.dataset.waiting, slot.block);
+  markToolCards();
+}
+
+function markToolCards() {
+  for (const node of $('right').querySelectorAll('[data-tool]')) {
+    node.classList.toggle('hit', Boolean(view.tool) && node.dataset.tool === view.tool);
+  }
+}
+
+// --- Rendering -----------------------------------------------------------------
+
+const list = $('list');
+const atTop = () => list.scrollTop <= 4;
+
+function newestMain() {
+  const all = [...store.exchanges.values()].reverse();
+  return all.find(ex => ex.kind === 'main' && isVisible(ex)) ?? all.find(ex => ex.kind === 'main') ?? null;
+}
+
+function select(id, reveal = false) {
+  if (!store.exchanges.has(id)) return;
+  view.selected = id;
+  view.follow = false;
+  $('follow').checked = false;
+  schedule();
+  if (reveal) store.exchanges.get(id).row?.scrollIntoView({ block: 'nearest' });
+}
+
+function drawTotals() {
+  let errors = 0, fresh = 0, write = 0, read = 0, output = 0;
+  for (const ex of store.exchanges.values()) {
+    if (problem(ex)) errors++;
+    fresh += ex.usage.input_tokens ?? 0;
+    write += ex.usage.cache_creation_input_tokens ?? 0;
+    read += ex.usage.cache_read_input_tokens ?? 0;
+    output += ex.usage.output_tokens ?? 0;
+  }
+  $('t-requests').textContent = fmtInt(store.exchanges.size);
+  $('t-errors').textContent = fmtInt(errors);
+  $('t-input').textContent = `${fmtTokens(fresh)} / ${fmtTokens(write)} / ${fmtTokens(read)}`;
+  $('t-input').title = `${fmtInt(fresh)} fresh, ${fmtInt(write)} cache write, ${fmtInt(read)} cache read`;
+  $('t-output').textContent = fmtTokens(output);
+  $('t-tools').textContent = fmtInt([...store.tools.values()].filter(entry => entry.name).length);
+}
+
+function drawToolOptions() {
+  if (store.toolNames.size === view.optionCount) return; // rebuilding closes an open dropdown
+  view.optionCount = store.toolNames.size;
+  const select = $('tool-filter');
+  const names = [...store.toolNames].sort();
+  if (view.tool && !store.toolNames.has(view.tool)) names.push(view.tool);
+  select.replaceChildren(el('option', { value: '', text: 'all tools' }),
+    ...names.map(name => el('option', { value: name, text: name })));
+  select.value = view.tool;
+}
+
+function drawPill() {
+  $('pill').hidden = view.newCount === 0;
+  $('pill').textContent = `↑ ${view.newCount} new`;
+}
+
+function render() {
+  // New rows: keep the reader's place unless they are at the top.
+  const wasAtTop = atTop();
+  const before = list.scrollHeight;
+  const added = view.newRows.filter(ex => store.exchanges.has(ex.id));
+  view.newRows = [];
+  for (const ex of added) { list.prepend(drawRow(ex)); view.dirtyRows.delete(ex); }
+  for (const ex of view.dirtyRows) if (ex.row) drawRow(ex);
+  view.dirtyRows.clear();
+
+  let visible = 0;
+  for (const ex of store.exchanges.values()) {
+    const show = isVisible(ex);
+    if (show) visible++;
+    if (ex.row && ex.row.hidden === show) ex.row.hidden = !show;
+  }
+  if (!wasAtTop) {
+    list.scrollTop += list.scrollHeight - before;
+    view.newCount += added.filter(isVisible).length;
+  }
+  drawPill();
+
+  if (view.selected !== null && !store.exchanges.has(view.selected)) view.selected = null;
+  if (view.follow) {
+    if (atTop()) view.selected = null;
+    else view.selected ??= view.shown; // reading further down: stay on what is shown
+  }
+  const ex = view.selected !== null ? store.exchanges.get(view.selected) : newestMain();
+
+  if ((ex?.id ?? null) !== view.shown) {
+    store.exchanges.get(view.shown)?.row?.classList.remove('selected');
+    view.shown = ex?.id ?? null;
+    ex?.row?.classList.add('selected');
+  }
+  renderDetail(ex);
+  view.rebuild = false;
+  if (view.pairsChanged) refreshWaitingCalls();
+  view.pairsChanged = false;
+  if (view.filterChanged) markToolCards();
+  view.filterChanged = false;
+  drawTotals();
+  drawToolOptions();
+
+  let empty = $('list-empty');
+  if (visible === 0 && !empty) {
+    empty = el('div', { id: 'list-empty', class: 'empty', text: store.exchanges.size ? 'Nothing matches these filters.' : 'No traffic yet.' });
+    list.append(empty);
+  } else if (visible > 0) empty?.remove();
+  else if (empty) empty.textContent = store.exchanges.size ? 'Nothing matches these filters.' : 'No traffic yet.';
+}
+
+let scheduled = false;
+function schedule() {
+  if (scheduled) return;
+  scheduled = true;
+  setTimeout(() => {
+    scheduled = false;
+    safely(render);
+  }, 60);
+}
+
+// --- Controls ------------------------------------------------------------------
+
+$('errors-only').onchange = e => { view.errorsOnly = e.target.checked; schedule(); };
+$('hide-side').onchange = e => { view.hideSide = e.target.checked; schedule(); };
+$('tool-filter').onchange = e => { view.tool = e.target.value; view.filterChanged = true; schedule(); };
+$('follow').onchange = e => {
+  view.follow = e.target.checked;
+  if (view.follow) { view.selected = null; list.scrollTop = 0; }
+  schedule();
+};
+$('pill').onclick = () => { list.scrollTop = 0; };
+list.onscroll = () => {
+  if (atTop() && view.newCount) { view.newCount = 0; drawPill(); }
+  if (atTop() && view.follow) schedule();
+};
+
+// --- Connection ----------------------------------------------------------------
+
+function setConnected(live) {
+  $('conn').classList.toggle('live', live);
+  $('conn-text').textContent = live ? 'live' : 'reconnecting…';
+}
+
+function connect() {
+  const source = new EventSource('/__events');
+  source.onopen = () => setConnected(true);
+  source.onmessage = message => {
+    setConnected(true);
+    safely(() => onEvent(JSON.parse(message.data)));
+    schedule();
+  };
+  source.onerror = () => {
+    setConnected(false);
+    if (source.readyState === EventSource.CLOSED) setTimeout(connect, 2000); // some browsers give up on a refused connection
+  };
+}
+
+schedule();
+connect();
+</script>
+</body>
+</html>
