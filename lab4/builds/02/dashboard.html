@@ -1,0 +1,1206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent traffic</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --line: #e5e7eb; --text: #111827; --muted: #6b7280; --faint: #9ca3af;
+    --red: #dc2626; --red-bg: #fef2f2; --amber: #d97706; --amber-bg: #fffbeb; --green: #16a34a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; height: 100%; }
+  body { font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); background: var(--bg);
+         display: flex; flex-direction: column; }
+  button { font: inherit; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .muted { color: var(--muted); }
+
+  /* ---- top bar ---- */
+  #top { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+         padding: 8px 14px; background: #111827; color: #e5e7eb; }
+  #top .brand { font-weight: 600; color: #fff; }
+  #live { display: inline-flex; align-items: center; gap: 6px; }
+  #live .dot { width: 9px; height: 9px; border-radius: 50%; background: #f59e0b; }
+  #live.on .dot { background: #22c55e; box-shadow: 0 0 0 3px rgba(34,197,94,.25); }
+  #live.off .dot { background: #f59e0b; animation: pulse 1s infinite; }
+  #totals { display: flex; gap: 12px; flex-wrap: wrap; }
+  #totals .t b { color: #fff; font-variant-numeric: tabular-nums; }
+  #totals .t.err b { color: #f87171; }
+  #totals .t.terr b { color: #fbbf24; }
+  #totals .t span { color: #9ca3af; }
+  #top .ctl { display: flex; gap: 12px; align-items: center; margin-left: auto; }
+  #top label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; user-select: none; }
+  #top select { font: inherit; padding: 1px 4px; border-radius: 4px; }
+
+  /* ---- panes ---- */
+  main { flex: 1; display: flex; min-height: 0; }
+  #listPane { width: 38%; min-width: 320px; overflow-y: auto; overflow-anchor: none; border-right: 1px solid var(--line);
+              background: var(--panel); position: relative; }
+  #detail { flex: 1; overflow-y: auto; padding: 12px 16px 60px; min-width: 0; }
+  #newPill { position: sticky; top: 8px; z-index: 3; display: block; margin: 0 auto -30px; height: 30px; padding: 0 14px;
+             border: 0; border-radius: 15px; background: #2563eb; color: #fff; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+  .emptylist { padding: 24px; color: var(--muted); }
+
+  /* ---- rows ---- */
+  .row { padding: 5px 10px 5px 8px; border-left: 4px solid transparent; border-bottom: 1px solid #f0f1f3; cursor: pointer;
+         white-space: nowrap; overflow: hidden; }
+  .row:hover { background: #f9fafb; }
+  .row.sel { background: #eef2ff; }
+  .row.dim { opacity: .55; }
+  .row.dim.sel { opacity: .8; }
+  .row.lv-error { border-left-color: var(--red); }
+  .row.lv-toolerr { border-left-color: var(--amber); }
+  .row.lv-warn { border-left: 4px dotted var(--amber); }
+  .row .l1, .row .l2 { display: flex; align-items: center; gap: 6px; overflow: hidden; height: 20px; }
+  .row .l2 { color: var(--muted); font-size: 12px; }
+  .row .id { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 34px; }
+  .row .time, .row .dur { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .row .model { color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+  .row .dur { margin-left: auto; }
+  .row .snip { overflow: hidden; text-overflow: ellipsis; color: #374151; }
+  .row .out { margin-left: auto; padding-left: 6px; font-variant-numeric: tabular-nums; }
+  .kindlbl { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #f3f4f6; color: #4b5563; }
+  .tchip { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px;
+           border-radius: 4px; color: #fff; font-size: 11px; font-weight: 700; }
+  .tchip.none { background: #d1d5db; color: #4b5563; }
+  .tchip.side { opacity: .8; }
+  .badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 9px; font-size: 11px;
+           font-weight: 600; font-variant-numeric: tabular-nums; }
+  .badge.ok { background: #dcfce7; color: #166534; }
+  .badge.bad { background: #fee2e2; color: #991b1b; }
+  .badge.stream { background: #dbeafe; color: #1e40af; animation: pulse 1.1s ease-in-out infinite; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #c7d2fe; border-top-color: #2563eb;
+          border-radius: 50%; animation: spin .8s linear infinite; vertical-align: middle; }
+  .toolchip { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #fff7ed; color: #9a3412; border: 1px solid #fed7aa; }
+  .terrchip { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; font-weight: 600; }
+  .warnchip { font-size: 11px; padding: 0 5px; border-radius: 3px; color: #92400e; border: 1px dashed #f59e0b; }
+  .errchip { font-size: 11px; padding: 0 5px; border-radius: 3px; background: #fee2e2; color: #991b1b; font-weight: 600; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 50% { opacity: .45; } }
+
+  /* ---- detail ---- */
+  .empty { color: var(--muted); padding: 30px 10px; }
+  .summary { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+  .summary .s1 { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; }
+  .summary .s1 .big { font-weight: 700; font-size: 15px; }
+  .summary .s2 { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; color: #374151; font-variant-numeric: tabular-nums; }
+  .summary .s2 .k { color: var(--muted); }
+  .warnline { margin-top: 6px; padding: 4px 8px; border-radius: 4px; background: var(--amber-bg); color: #92400e; border: 1px solid #fde68a; }
+  .errline { margin-top: 6px; padding: 4px 8px; border-radius: 4px; background: var(--red-bg); color: #991b1b; border: 1px solid #fecaca; }
+
+  .sec { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; }
+  .sec-head { display: flex; gap: 8px; align-items: center; padding: 7px 12px; cursor: pointer; user-select: none; flex-wrap: wrap; }
+  .sec-head:hover { background: #f9fafb; border-radius: 8px; }
+  .sec-title { font-weight: 600; }
+  .sec-body { padding: 4px 12px 12px; border-top: 1px solid #f0f1f3; }
+  .tw { display: inline-block; width: 12px; color: var(--muted); }
+  .hbadge { font-size: 11px; padding: 1px 6px; border-radius: 9px; background: #f3f4f6; color: #374151; }
+  .hbadge.chg { background: #fef3c7; color: #92400e; }
+  .hbadge.add { background: #dcfce7; color: #166534; }
+  .hbadge.del { background: #fee2e2; color: #991b1b; }
+  .hbadge.err { background: #fee2e2; color: #991b1b; }
+
+  /* message wrappers */
+  .msg { margin: 10px 0; }
+  .msg.assistant { margin-left: 24px; }
+  .msg-head { font-size: 11px; color: var(--muted); margin-bottom: 3px; font-variant-numeric: tabular-nums; }
+  .msg-head b { color: #374151; }
+  .group-toggle { display: block; width: 100%; text-align: left; border: 1px dashed #d1d5db; background: #fafafa; color: #4b5563;
+                  border-radius: 6px; padding: 6px 10px; margin: 8px 0; cursor: pointer; }
+  .group-toggle:hover { background: #f3f4f6; }
+
+  /* cards: the colored bar + label scheme from the spec */
+  .card { border-left: 4px solid var(--bar); background: var(--bg2); border-radius: 0 6px 6px 0; margin: 4px 0; padding: 5px 10px 7px; }
+  .card.hl { outline: 1.5px solid #111827; outline-offset: 1px; }
+  .card-head { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .card-head.clickable { cursor: pointer; }
+  .card .icon { color: var(--bar); font-size: 12px; width: 14px; text-align: center; flex: none; }
+  .card .label { font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--bar); flex: none; }
+  .card .meta { margin-left: auto; font-size: 11px; color: var(--muted); flex: none; padding-left: 8px; }
+  .card .preview { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; flex: 1; font-size: 12px; }
+  .card-body { margin-top: 3px; }
+  .k-you     { --bar: #2563eb; --bg2: #eff6ff; }
+  .k-inject  { --bar: #9ca3af; --bg2: #f9fafb; }
+  .k-sysmsg  { --bar: #6b7280; --bg2: #f3f4f6; }
+  .k-added   { --bar: #6b7280; --bg2: #f9fafb; }
+  .k-model   { --bar: #16a34a; --bg2: #f0fdf4; }
+  .k-think   { --bar: #9333ea; --bg2: #faf5ff; }
+  .k-think .txt { font-style: italic; }
+  .k-call    { --bar: #ea580c; --bg2: #fff7ed; }
+  .k-result  { --bar: #0d9488; --bg2: #f0fdfa; }
+  .k-error   { --bar: #dc2626; --bg2: #fef2f2; }
+  .k-unknown { --bar: #9ca3af; --bg2: #f9fafb; }
+  .k-inject .card-body, .k-sysmsg .card-body { color: #4b5563; }
+  .callgroup { margin: 4px 0 8px; }
+  .slot { margin-left: 18px; }
+  .slot .card { margin-top: 2px; }
+  .waiting { margin: 2px 0 0 18px; padding: 4px 10px; border-left: 4px dashed #99f6e4; color: #0f766e; font-style: italic; background: #f8fffe; }
+  .stub { color: var(--muted); font-size: 12px; padding: 2px 10px; border-left: 4px solid #ccfbf1; margin: 3px 0; }
+  .call-sum { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; color: #7c2d12; }
+  .call-desc { color: var(--muted); font-size: 12px; }
+  .sublabel { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 4px; }
+  .loaded { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: #0f766e; padding: 3px 0; }
+  .loaded span { font-family: var(--mono); font-weight: 600; letter-spacing: 0; }
+  .rlink { font-size: 11px; color: #2563eb; cursor: pointer; text-decoration: underline; background: none; border: 0; padding: 0; }
+
+  /* long text */
+  .lt { position: relative; }
+  .txt { white-space: pre-wrap; word-break: break-word; }
+  .txt.mono { font-family: var(--mono); font-size: 12px; }
+  .lt-tools { display: flex; gap: 10px; margin-top: 2px; }
+  .link { background: none; border: 0; padding: 0; color: #2563eb; cursor: pointer; font-size: 11.5px; }
+  .link:hover { text-decoration: underline; }
+
+  /* JSON tree */
+  .jt { font-family: var(--mono); font-size: 12px; line-height: 1.5; }
+  .jkids { padding-left: 16px; border-left: 1px dotted #e5e7eb; margin-left: 5px; }
+  .jh { cursor: pointer; }
+  .jh:hover { background: #f3f4f6; }
+  .jk { color: #6b7280; }
+  .js { color: #047857; white-space: pre-wrap; word-break: break-word; }
+  .jnum { color: #1d4ed8; }
+  .jbool { color: #9333ea; }
+  .jnull { color: #9ca3af; }
+  .jsum { color: #9ca3af; }
+  .jchg { background: #fef3c7; border-radius: 3px; }
+
+  /* system / tools / headers */
+  .sysblk { border: 1px solid var(--line); border-radius: 6px; margin: 8px 0; }
+  .sysblk-head { display: flex; gap: 8px; align-items: center; padding: 5px 10px; background: #f9fafb; cursor: pointer; border-radius: 6px 6px 0 0; }
+  .sysblk-body { padding: 6px 10px; }
+  .tag { font-size: 10.5px; padding: 0 5px; border-radius: 3px; background: #e0e7ff; color: #3730a3; }
+  .tag.def { background: #f3e8ff; color: #6b21a8; }
+  .tag.new { background: #dcfce7; color: #166534; }
+  .tool-line { display: flex; gap: 8px; align-items: baseline; padding: 3px 4px; cursor: pointer; border-bottom: 1px solid #f3f4f6; }
+  .tool-line:hover { background: #f9fafb; }
+  .tool-line .nm { font-family: var(--mono); font-weight: 600; flex: none; }
+  .tool-line .d1 { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tool-detail { padding: 6px 4px 10px 20px; border-bottom: 1px solid #f3f4f6; }
+  table.hdrs { border-collapse: collapse; width: 100%; font-size: 12px; margin-bottom: 10px; }
+  table.hdrs td { border-bottom: 1px solid #f3f4f6; padding: 2px 6px; vertical-align: top; }
+  table.hdrs td:first-child { font-family: var(--mono); color: var(--muted); white-space: nowrap; width: 1%; }
+  table.hdrs td:last-child { font-family: var(--mono); word-break: break-all; }
+  h4 { margin: 10px 0 4px; font-size: 12px; color: #374151; }
+  .diff { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--line); border-radius: 6px; padding: 6px; margin: 6px 0; max-height: 420px; overflow: auto; }
+  .diff .a { background: #dcfce7; } .diff .d { background: #fee2e2; } .diff .c { color: #6b7280; } .diff .gap { color: #9ca3af; font-style: italic; }
+  .errbox { border-left: 4px solid var(--red); background: var(--red-bg); color: #991b1b; padding: 6px 10px; border-radius: 0 6px 6px 0; margin: 6px 0; }
+  .errbox b { font-family: var(--mono); }
+  .note { color: var(--muted); font-style: italic; margin: 6px 0; }
+</style>
+</head>
+<body>
+<header id="top">
+  <span class="brand">Agent traffic</span>
+  <span id="live" class="off"><span class="dot"></span><span id="liveText">connecting…</span></span>
+  <span id="totals"></span>
+  <span class="ctl">
+    <label>Tool <select id="toolFilter"><option value="">all tools</option></select></label>
+    <label><input type="checkbox" id="errorsOnly"> Errors only</label>
+    <label><input type="checkbox" id="hideSide"> Hide side calls</label>
+    <label><input type="checkbox" id="follow" checked> Follow newest</label>
+  </span>
+</header>
+<main>
+  <section id="listPane">
+    <button id="newPill" hidden></button>
+    <div id="list"></div>
+    <div id="emptyList" class="emptylist">No traffic yet. Run the agent with <code>ANTHROPIC_BASE_URL=http://localhost:8041 claude</code>, or start the proxy with <code>--demo</code>.</div>
+  </section>
+  <section id="detail"></section>
+</main>
+<script>
+'use strict';
+// All data goes into the page through textContent / createElement. Never innerHTML with data.
+
+const $ = (id) => document.getElementById(id);
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  if (props) for (const k in props) {
+    const v = props[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'text') el.textContent = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    el.append(c instanceof Node ? c : String(c));
+  }
+  return el;
+}
+const PALETTE = ['#2563eb', '#0d9488', '#d97706', '#db2777', '#475569'];  // blue, teal, amber, pink, slate
+const PARAM_KEYS = ['model', 'max_tokens', 'thinking', 'output_config', 'context_management'];
+const fmtN = (n) => (n == null || isNaN(n)) ? '–' : Number(n).toLocaleString('en-US');
+const fmtDur = (ms) => ms == null ? '…' : ms < 1000 ? Math.round(ms) + 'ms' : (ms / 1000).toFixed(ms < 10000 ? 2 : 1) + 's';
+const fmtTime = (t) => { const d = new Date(t); return [d.getHours(), d.getMinutes(), d.getSeconds()].map(x => String(x).padStart(2, '0')).join(':'); };
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const letterFor = (i) => i < 26 ? String.fromCharCode(65 + i) : String.fromCharCode(64 + Math.floor(i / 26)) + String.fromCharCode(65 + i % 26);
+
+// ---------- normalization (5.2) ----------
+function stable(v) {  // JSON.stringify with sorted keys and every cache_control removed
+  if (v === null || typeof v !== 'object') { const s = JSON.stringify(v); return s === undefined ? 'null' : s; }
+  if (Array.isArray(v)) return '[' + v.map(stable).join(',') + ']';
+  return '{' + Object.keys(v).filter(k => k !== 'cache_control' && v[k] !== undefined).sort()
+    .map(k => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
+}
+const normContent = (c) => typeof c === 'string' ? [{ type: 'text', text: c }] : c;
+const normMsg = (m) => isObj(m) ? stable(Object.assign({}, m, { content: normContent(m.content) })) : stable(m);
+function systemBlocks(sys) {
+  if (typeof sys === 'string') return [{ type: 'text', text: sys }];
+  if (Array.isArray(sys)) return sys.map(b => typeof b === 'string' ? { type: 'text', text: b } : (b || {}));
+  return [];
+}
+const blocksOf = (m) => !isObj(m) ? [] : Array.isArray(m.content) ? m.content : typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content == null ? [] : [m.content];
+const hdr = (list, name) => { name = name.toLowerCase(); for (const [k, v] of list || []) if (String(k).toLowerCase() === name) return v; return null; };
+const isReminder = (t) => typeof t === 'string' && t.trimStart().startsWith('<system-reminder>');
+
+// ---------- state ----------
+let S;
+function freshState() {
+  S = { ex: new Map(), order: [], threads: new Map(), nextLetter: 0, sessionLetter: new Map(),
+        tools: new Map(), toolNames: new Set() };
+}
+freshState();
+const UI = { selectedId: null, displayedId: null, newCount: 0, dirtyRows: new Set(), dirtyEx: new Set(),
+             slotIds: new Set(), detailDirty: true, totalsDirty: true, toolsDirty: true, raf: false, slots: [] };
+const F = { tool: '', errorsOnly: false, hideSide: false, follow: true };
+
+function toolEntry(id) {
+  let e = S.tools.get(id);
+  if (!e) { e = { name: null, input: undefined, callExchangeId: null, resultExchangeId: null, resultBlock: null }; S.tools.set(id, e); }
+  return e;
+}
+function addToolName(n) { if (n && !S.toolNames.has(n)) { S.toolNames.add(n); UI.toolsDirty = true; } }
+
+// ---------- classification (5.1) ----------
+function classify(ex) {
+  const b = ex.body;
+  if (ex.method !== 'POST' || !ex.path.startsWith('/v1/messages')) return ['probe', 'probe'];
+  if (b && b.max_tokens === 1) return ['probe', 'probe: quota'];
+  if (!b || !Array.isArray(b.tools) || b.tools.length === 0) {
+    const props = b && b.output_config && b.output_config.format && b.output_config.format.schema && b.output_config.format.schema.properties;
+    const name = isObj(props) ? Object.keys(props)[0] : null;
+    return ['side', name ? 'side: ' + name : 'side'];
+  }
+  return ['main', ''];
+}
+
+// ---------- events ----------
+function onRequest(ev) {
+  const b = isObj(ev.body_json) ? ev.body_json : null;
+  const ex = {
+    id: ev.id, t0: ev.t, method: ev.method || '', path: ev.path || '', headers: ev.headers || [],
+    body: b, bodyAny: ev.body_json, bodyText: ev.body, start: null, end: null, raw: '',
+    sse: null, sseBuf: '', evName: null, dataLines: [],
+    reply: { msgId: null, model: null, usage: {}, stop: null, blocks: [], complete: false, error: null,
+             text: null, json: null, warnings: [] },
+    ver: 0, toolErrorIds: [], newResultIds: [], thread: null, rowEl: null,
+  };
+  [ex.kind, ex.label] = classify(ex);
+  ex.session = hdr(ex.headers, 'x-claude-code-session-id') || '';
+  const msgs = b && Array.isArray(b.messages) ? b.messages : [];
+  ex.msgs = msgs;
+  ex.norm = msgs.map(normMsg);
+
+  // thread
+  if (!(ex.kind === 'probe' && !b)) {
+    const sys = systemBlocks(b && b.system);
+    const lastSys = sys.length ? String(sys[sys.length - 1].text || '') : '';
+    const fu = msgs.findIndex(m => isObj(m) && m.role === 'user');
+    const key = ex.session + '\u0001' + lastSys.slice(0, 300) + '\u0001' + (fu >= 0 ? ex.norm[fu] : '').slice(0, 300);
+    let th = S.threads.get(key);
+    if (!th) { th = { key, session: ex.session, letter: null, color: null, ids: [] }; S.threads.set(key, th); }
+    if (ex.kind === 'main' && !th.letter) {
+      // Letters go to main threads in order of first appearance; side calls show their session's main letter.
+      const i = S.nextLetter++;
+      th.letter = letterFor(i); th.color = PALETTE[i % PALETTE.length];
+      if (!S.sessionLetter.has(ex.session)) { S.sessionLetter.set(ex.session, th); for (const e of S.ex.values()) UI.dirtyRows.add(e.id); }
+    }
+    ex.thread = th;
+    const prev = th.ids.length ? S.ex.get(th.ids[th.ids.length - 1]) : null;
+    th.ids.push(ex.id);
+    computeDiff(ex, prev);
+  } else {
+    ex.diff = { prevId: null, newStart: msgs.length, L: 0 };
+  }
+
+  // tool index (5.4)
+  msgs.forEach((m, mi) => {
+    for (const blk of blocksOf(m)) {
+      if (!isObj(blk)) continue;
+      if (blk.type === 'tool_use' && blk.id) {
+        const e = toolEntry(blk.id);
+        if (!e.name) e.name = blk.name;
+        if (e.input === undefined) e.input = blk.input;
+        addToolName(blk.name);
+      } else if (blk.type === 'tool_result' && blk.tool_use_id) {
+        const e = toolEntry(blk.tool_use_id);
+        if (e.resultExchangeId == null) {
+          e.resultExchangeId = ex.id; e.resultBlock = blk;
+          if (blk.is_error) ex.toolErrorIds.push(blk.tool_use_id);
+          UI.slotIds.add(blk.tool_use_id);
+          if (e.callExchangeId != null) UI.dirtyEx.add(e.callExchangeId);
+        }
+        if (mi >= ex.diff.newStart) ex.newResultIds.push(blk.tool_use_id);
+      }
+    }
+  });
+
+  S.ex.set(ex.id, ex);
+  S.order.push(ex.id);
+  insertRow(ex);
+  UI.totalsDirty = true;
+  if (F.follow && ex.kind === 'main' && listAtTop() && visible(ex)) { UI.selectedId = ex.id; }
+  schedule();
+}
+
+function computeDiff(ex, prev) {
+  const d = { prevId: prev ? prev.id : null, L: 0, newStart: 0, historyChanged: false,
+              systemChanged: null, tools: null, paramsChanged: null };
+  const n = ex.norm;
+  if (prev) {
+    const p = prev.norm; let L = 0;
+    while (L < p.length && L < n.length && p[L] === n[L]) L++;
+    d.L = L; d.newStart = L; d.historyChanged = L < p.length;
+    const b = ex.body || {}, pb = prev.body || {};
+    d.systemChanged = stable(systemBlocks(b.system)) !== stable(systemBlocks(pb.system));
+    // tools
+    const cur = new Map((Array.isArray(b.tools) ? b.tools : []).map(t => [isObj(t) ? t.name : String(t), t]));
+    const old = new Map((Array.isArray(pb.tools) ? pb.tools : []).map(t => [isObj(t) ? t.name : String(t), t]));
+    const added = [], removed = [], changed = [];
+    for (const [k, t] of cur) { if (!old.has(k)) added.push(k); else if (stable(t) !== stable(old.get(k))) changed.push(k); }
+    for (const k of old.keys()) if (!cur.has(k)) removed.push(k);
+    d.tools = { added, removed, changed };
+    d.paramsChanged = PARAM_KEYS.filter(k => stable(b[k]) !== stable(pb[k]));
+  } else {
+    let lu = -1;
+    for (let i = ex.msgs.length - 1; i >= 0; i--) if (isObj(ex.msgs[i]) && ex.msgs[i].role === 'user') { lu = i; break; }
+    let s = lu < 0 ? 0 : lu;
+    while (s > 0 && isObj(ex.msgs[s - 1]) && ex.msgs[s - 1].role === 'system') s--;
+    d.newStart = s;
+  }
+  ex.diff = d;
+}
+
+function onStart(ev) {
+  const ex = S.ex.get(ev.id); if (!ex) return;
+  ex.start = ev;
+  const ct = String(hdr(ev.headers, 'content-type') || '').toLowerCase();
+  if (ct.includes('text/event-stream')) ex.sse = true;
+  else if (ct) ex.sse = false;
+  touch(ex);
+}
+function onChunk(ev) {
+  const ex = S.ex.get(ev.id); if (!ex) return;
+  const text = ev.text || '';
+  ex.raw += text;
+  if (ex.sse === null) { const t = ex.raw.trimStart(); if (t) ex.sse = t.startsWith('event:') || t.startsWith('data:'); }
+  if (ex.sse) feedSse(ex, text);
+  touch(ex);
+}
+function onEnd(ev) {
+  const ex = S.ex.get(ev.id); if (!ex) return;
+  ex.end = ev;
+  if (ex.sse) { if (ex.sseBuf) { sseLine(ex, ex.sseBuf); ex.sseBuf = ''; } dispatchSse(ex); }
+  else parseNonSse(ex);
+  UI.totalsDirty = true;
+  touch(ex);
+}
+function touch(ex) { ex.ver++; UI.dirtyRows.add(ex.id); UI.dirtyEx.add(ex.id); schedule(); }
+
+// ---------- SSE reply rebuild (5.5) ----------
+function feedSse(ex, text) {
+  const parts = (ex.sseBuf + text).split('\n');
+  ex.sseBuf = parts.pop();  // incomplete last line waits for the next chunk
+  for (const line of parts) sseLine(ex, line);
+}
+function sseLine(ex, line) {
+  line = line.replace(/\r$/, '');
+  if (line.trim() === '') { dispatchSse(ex); return; }
+  if (line[0] === ':') return;
+  const c = line.indexOf(':');
+  const field = c < 0 ? line : line.slice(0, c);
+  let val = c < 0 ? '' : line.slice(c + 1);
+  if (val[0] === ' ') val = val.slice(1);
+  if (field === 'event') ex.evName = val.trim();
+  else if (field === 'data') ex.dataLines.push(val);
+}
+function dispatchSse(ex) {
+  if (!ex.dataLines.length) { ex.evName = null; return; }
+  const raw = ex.dataLines.join('\n'); const name = ex.evName;
+  ex.dataLines = []; ex.evName = null;
+  let d;
+  try { d = JSON.parse(raw); } catch (e) { ex.reply.warnings.push('unparsable SSE data: ' + raw.slice(0, 120)); return; }
+  try { applySse(ex, (isObj(d) && d.type) || name, d); }
+  catch (e) { ex.reply.warnings.push('could not apply event ' + name + ': ' + e.message); }
+}
+function applySse(ex, type, d) {
+  const r = ex.reply;
+  switch (type) {
+    case 'message_start': {
+      const m = d.message || {};
+      r.msgId = m.id || r.msgId; r.model = m.model || r.model;
+      if (isObj(m.usage)) Object.assign(r.usage, m.usage);
+      break;
+    }
+    case 'content_block_start': {
+      const cb = isObj(d.content_block) ? d.content_block : { type: 'unknown' };
+      const b = Object.assign({}, cb, { _raw: '', _done: false });
+      if (cb.type === 'text') b.text = cb.text || '';
+      if (cb.type === 'thinking') { b.thinking = cb.thinking || ''; b._signed = !!cb.signature; }
+      r.blocks[d.index] = b;
+      if (cb.type === 'tool_use' && cb.id) {
+        const e = toolEntry(cb.id); e.name = cb.name; e.callExchangeId = ex.id;
+        if (e.input === undefined) e.input = cb.input;
+        addToolName(cb.name); UI.totalsDirty = true;
+      }
+      break;
+    }
+    case 'content_block_delta': {
+      const b = r.blocks[d.index]; const dl = d.delta || {};
+      if (!b) { r.warnings.push('delta for unknown block #' + d.index); break; }
+      if (dl.type === 'text_delta') b.text = (b.text || '') + (dl.text || '');
+      else if (dl.type === 'thinking_delta') b.thinking = (b.thinking || '') + (dl.thinking || '');
+      else if (dl.type === 'signature_delta') b._signed = true;
+      else if (dl.type === 'input_json_delta') b._raw += dl.partial_json || '';
+      else (b._otherDeltas = b._otherDeltas || []).push(dl);
+      break;
+    }
+    case 'content_block_stop': {
+      const b = r.blocks[d.index]; if (!b) break;
+      b._done = true;
+      if (b.type === 'tool_use' || b.type === 'server_tool_use') {
+        if (b._raw.trim()) {
+          try { b.input = JSON.parse(b._raw); }
+          catch (e) { b._parseError = e.message; r.warnings.push(`tool input for ${b.name} is not valid JSON; showing the raw string`); }
+        }
+        if (b.id) { const e = toolEntry(b.id); if (!b._parseError) e.input = b.input; }
+      }
+      break;
+    }
+    case 'message_delta':
+      if (d.delta && d.delta.stop_reason !== undefined) r.stop = d.delta.stop_reason;
+      if (isObj(d.usage)) Object.assign(r.usage, d.usage);
+      break;
+    case 'message_stop': r.complete = true; break;
+    case 'error': r.error = Object.assign({}, d.error || {}, { request_id: d.request_id }); break;
+    case 'ping': break;
+    default: r.warnings.push('unknown SSE event: ' + type);
+  }
+}
+function parseNonSse(ex) {
+  const r = ex.reply; const t = ex.raw.trim();
+  if (!t) return;
+  let j;
+  try { j = JSON.parse(t); } catch (e) { r.text = ex.raw; return; }
+  if (isObj(j) && j.type === 'error') r.error = Object.assign({}, j.error || {}, { request_id: j.request_id });
+  else if (isObj(j) && j.type === 'message') {
+    r.msgId = j.id; r.model = j.model; r.stop = j.stop_reason; r.complete = true;
+    if (isObj(j.usage)) Object.assign(r.usage, j.usage);
+    r.blocks = (Array.isArray(j.content) ? j.content : []).map(b => Object.assign({}, b, { _done: true }));
+    for (const b of r.blocks) if (b.type === 'tool_use' && b.id) {
+      const e = toolEntry(b.id); e.name = b.name; e.input = b.input; e.callExchangeId = ex.id; addToolName(b.name);
+    }
+  } else r.json = j;
+}
+
+// ---------- levels (6.5) ----------
+function failed(ex) {
+  if (ex.start && ex.start.status >= 400) return true;
+  if (ex.end && ex.end.ok === false) return true;
+  if (ex.reply.error) return true;
+  if (ex.end && ex.sse && !ex.reply.complete) return true;
+  return false;
+}
+function level(ex) {
+  if (ex.kind !== 'probe' && failed(ex)) return 'error';
+  if (ex.toolErrorIds.length) return 'toolerr';
+  if (ex.reply.stop === 'max_tokens') return 'warn';
+  return null;
+}
+function involves(ex, name) {
+  for (const b of ex.reply.blocks) if (b && b.type === 'tool_use' && b.name === name) return true;
+  for (const id of ex.newResultIds) { const e = S.tools.get(id); if (e && e.name === name) return true; }
+  return false;
+}
+function visible(ex) {
+  if (F.hideSide && ex.kind !== 'main') return false;
+  if (F.errorsOnly && !level(ex)) return false;
+  if (F.tool && !involves(ex, F.tool)) return false;
+  return true;
+}
+const usageOf = (ex) => ex.reply.usage || {};
+const ctxSize = (u) => (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+
+// ---------- list rows (6.2) ----------
+const listPane = $('listPane'), list = $('list');
+const listAtTop = () => listPane.scrollTop < 4;
+function insertRow(ex) {
+  ex.rowEl = h('div', { class: 'row', 'data-id': ex.id, onclick: () => { setFollow(false); select(ex.id); } });
+  renderRow(ex);
+  $('emptyList').hidden = true;
+  const atTop = listAtTop();
+  const before = listPane.scrollHeight;
+  // newest first: rows arrive in id order, but insert by id to be safe
+  let ref = list.firstChild;
+  while (ref && Number(ref.dataset.id) > ex.id) ref = ref.nextSibling;
+  list.insertBefore(ex.rowEl, ref);
+  if (!atTop) {
+    listPane.scrollTop += listPane.scrollHeight - before;  // don't jump while the user is reading
+    if (visible(ex)) { UI.newCount++; updatePill(); }
+  }
+}
+function updatePill() {
+  const p = $('newPill');
+  p.hidden = UI.newCount === 0;
+  p.textContent = `↑ ${UI.newCount} new`;
+}
+function threadChip(ex) {
+  const th = ex.thread;
+  if (th && th.letter) return h('span', { class: 'tchip', style: `background:${th.color}`, title: 'thread ' + th.letter, text: th.letter });
+  const main = S.sessionLetter.get(ex.session);
+  if (th && main && ex.session) return h('span', { class: 'tchip side', style: `background:${main.color}`, title: `side call of thread ${main.letter}'s session`, text: main.letter });
+  return h('span', { class: 'tchip none', title: 'no thread', text: '·' });
+}
+function statusBadge(ex) {
+  if (!ex.start && !ex.end) return h('span', { class: 'spin', title: 'pending' });
+  const st = ex.start ? ex.start.status : null;
+  if (!ex.end) return h('span', { class: 'badge stream' + (st >= 400 ? ' bad' : ''), title: 'streaming', text: st ?? '…' });
+  if (st >= 400) return h('span', { class: 'badge bad', text: st });
+  if (failed(ex)) return h('span', { class: 'badge bad', title: ex.end.error || 'stream incomplete', text: (st || '') + ' !' });
+  return h('span', { class: 'badge ok', text: st ?? 'ok' });
+}
+function replyBits(ex) {
+  const r = ex.reply, out = [];
+  const counts = new Map();
+  for (const b of r.blocks) if (b && b.type === 'tool_use') counts.set(b.name, (counts.get(b.name) || 0) + 1);
+  for (const [n, c] of counts) out.push(h('span', { class: 'toolchip', text: c > 1 ? `${n} ×${c}` : n }));
+  let text = r.blocks.filter(b => b && b.type === 'text').map(b => b.text || '').join(' ');
+  if (!text && r.text) text = r.text;
+  if (r.error) text = `${r.error.type || 'error'}: ${r.error.message || ''}`;
+  else if (!text && ex.end && ex.end.error) text = ex.end.error;
+  else if (!text && ex.method === 'HEAD' && ex.end) text = '(no body)';
+  text = text.replace(/\s+/g, ' ').trim();
+  if (text) out.push(h('span', { class: 'snip', text: text.length > 70 ? text.slice(0, 70) + '…' : text }));
+  return out;
+}
+function renderRow(ex) {
+  const el = ex.rowEl; if (!el) return;
+  const lv = level(ex);
+  el.className = 'row' + (ex.kind !== 'main' ? ' dim' : '') + (lv ? ' lv-' + lv : '') + (ex.id === UI.displayedId ? ' sel' : '');
+  const model = ex.reply.model || (ex.body && ex.body.model) || '';
+  const dur = ex.end ? ex.end.t - ex.t0 : null;
+  const l1 = h('div', { class: 'l1' },
+    h('span', { class: 'id', text: '#' + ex.id }),
+    h('span', { class: 'time', text: fmtTime(ex.t0) }),
+    threadChip(ex),
+    ex.label ? h('span', { class: 'kindlbl', text: ex.label }) : null,
+    statusBadge(ex),
+    h('span', { class: 'model', text: model }),
+    h('span', { class: 'dur', text: ex.end ? fmtDur(dur) : '' }));
+  const n = ex.msgs.length - ex.diff.newStart;
+  const bits = replyBits(ex);
+  const l2 = h('div', { class: 'l2' },
+    ex.kind !== 'probe' && ex.body ? h('span', { text: `+${n} ${n === 1 ? 'msg' : 'msgs'}` }) : null,
+    lv === 'error' ? h('span', { class: 'errchip', text: 'error' }) : null,
+    lv === 'toolerr' ? h('span', { class: 'terrchip', text: 'tool error' }) : null,
+    ex.reply.stop === 'max_tokens' ? h('span', { class: 'warnchip', text: 'max_tokens' }) : null,
+    bits.length ? h('span', { text: '→' }) : null,
+    bits,
+    usageOf(ex).output_tokens != null ? h('span', { class: 'out', text: fmtN(usageOf(ex).output_tokens) + ' out' }) : null);
+  el.replaceChildren(l1, l2);
+  el.hidden = !visible(ex);
+}
+
+// ---------- totals ----------
+function renderTotals() {
+  let req = 0, err = 0, terr = 0, fin = 0, cw = 0, cr = 0, out = 0, calls = 0;
+  for (const ex of S.ex.values()) {
+    req++;
+    if (level(ex) === 'error') err++;
+    terr += ex.toolErrorIds.length;
+    const u = usageOf(ex);
+    fin += u.input_tokens || 0; cw += u.cache_creation_input_tokens || 0; cr += u.cache_read_input_tokens || 0; out += u.output_tokens || 0;
+    for (const b of ex.reply.blocks) if (b && b.type === 'tool_use') calls++;
+  }
+  const t = (cls, label, val, title) => h('span', { class: 't ' + cls, title }, h('span', { text: label + ' ' }), h('b', { text: val }));
+  $('totals').replaceChildren(
+    t('', 'requests', fmtN(req)),
+    t(err ? 'err' : '', 'errors', fmtN(err), 'exchanges that failed (probes excluded)'),
+    t(terr ? 'terr' : '', 'tool errors', fmtN(terr), 'tool results with is_error (the agent\'s tools failing, not the traffic)'),
+    t('', 'input', `${fmtN(fin)} / ${fmtN(cw)} / ${fmtN(cr)}`, 'fresh / cache write / cache read'),
+    t('', 'output', fmtN(out)),
+    t('', 'tool calls', fmtN(calls)));
+}
+function renderToolOptions() {
+  const sel = $('toolFilter'); const cur = sel.value;
+  const names = [...S.toolNames].sort((a, b) => a.localeCompare(b));
+  if (F.tool && !S.toolNames.has(F.tool)) names.push(F.tool);
+  sel.replaceChildren(h('option', { value: '', text: 'all tools' }), ...names.map(n => h('option', { value: n, text: n })));
+  sel.value = cur;
+}
+
+// ---------- scheduling ----------
+function schedule() { if (!UI.raf) { UI.raf = true; requestAnimationFrame(flush); } }
+function currentTarget() {
+  if (UI.selectedId != null && S.ex.has(UI.selectedId)) return S.ex.get(UI.selectedId);
+  for (let i = S.order.length - 1; i >= 0; i--) { const e = S.ex.get(S.order[i]); if (e && e.kind === 'main') return e; }
+  return null;
+}
+function flush() {
+  UI.raf = false;
+  try {
+    for (const id of UI.dirtyRows) { const ex = S.ex.get(id); if (ex) renderRow(ex); }
+    UI.dirtyRows.clear();
+    if (UI.totalsDirty) { UI.totalsDirty = false; renderTotals(); }
+    if (UI.toolsDirty) { UI.toolsDirty = false; renderToolOptions(); }
+    const target = currentTarget();
+    const tid = target ? target.id : null;
+    if (UI.detailDirty || tid !== UI.displayedId) {
+      const prevSel = UI.displayedId;
+      UI.detailDirty = false;
+      buildDetail(target);
+      for (const id of [prevSel, tid]) { const e = S.ex.get(id); if (e) renderRow(e); }
+    } else if (target && UI.dirtyEx.has(target.id)) {
+      refreshDetail(target);
+    }
+    if (UI.slotIds.size) {
+      for (const s of UI.slots) if (UI.slotIds.has(s.toolId) && s.el.isConnected) renderSlot(s);
+      UI.slots = UI.slots.filter(s => s.el.isConnected);
+    }
+    UI.slotIds.clear(); UI.dirtyEx.clear();
+  } catch (e) { console.error(e); }
+}
+function select(id) { UI.selectedId = id; schedule(); }
+function setFollow(on) {
+  F.follow = on; $('follow').checked = on;
+  if (on) {
+    for (let i = S.order.length - 1; i >= 0; i--) { const e = S.ex.get(S.order[i]); if (e && e.kind === 'main' && visible(e)) { UI.selectedId = e.id; break; } }
+    listPane.scrollTop = 0;
+    schedule();
+  }
+}
+function refilter() {
+  for (const ex of S.ex.values()) if (ex.rowEl) ex.rowEl.hidden = !visible(ex);
+  UI.detailDirty = true; schedule();
+}
+
+// ---------- generic UI pieces ----------
+function clampText(text) {
+  const lines = text.split('\n');
+  let s = lines.length > 15 ? lines.slice(0, 15).join('\n') : text;
+  if (s.length > 1200) s = s.slice(0, 1200);
+  return s + '…';
+}
+function copyBtn(text) {
+  const b = h('button', { class: 'link', text: 'copy', onclick: (e) => {
+    e.stopPropagation();
+    const done = () => { b.textContent = 'copied'; setTimeout(() => b.textContent = 'copy', 1200); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, () => fallback());
+    else fallback();
+    function fallback() { const ta = h('textarea', { style: 'position:fixed;opacity:0' }); ta.value = text; document.body.append(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) {} ta.remove(); }
+  } });
+  return b;
+}
+function longText(text, opts = {}) {
+  text = text == null ? '' : String(text);
+  const lines = text.split('\n').length, chars = text.length;
+  const long = lines > 15 || chars > 1200;
+  const pre = h('div', { class: 'txt' + (opts.mono ? ' mono' : '') });
+  const wrap = h('div', { class: 'lt' }, pre);
+  const tools = h('div', { class: 'lt-tools' });
+  if (long) {
+    const short = clampText(text); let open = false;
+    const label = `show all (${fmtN(lines)} lines, ${fmtN(chars)} chars)`;
+    pre.textContent = short;
+    const btn = h('button', { class: 'link', text: label, onclick: (e) => {
+      e.stopPropagation(); open = !open; pre.textContent = open ? text : short; btn.textContent = open ? 'show less' : label;
+    } });
+    tools.append(btn);
+  } else pre.textContent = text;
+  if (opts.copy !== false && chars) tools.append(copyBtn(text));
+  if (tools.childNodes.length) wrap.append(tools);
+  return wrap;
+}
+
+function jsonTree(v, openDepth = 2, opts = {}) { return h('div', { class: 'jt' }, jnode(null, v, 0, openDepth, opts)); }
+function jnode(key, v, depth, openDepth, opts) {
+  const keyEl = key == null ? [] : [h('span', { class: 'jk', text: typeof key === 'number' ? key : JSON.stringify(key) }), h('span', { class: 'jk', text: ': ' })];
+  const hl = depth === 1 && opts.highlight && opts.highlight.has(key);
+  if (v !== null && typeof v === 'object') {
+    const isArr = Array.isArray(v); const keys = isArr ? v.map((_, i) => i) : Object.keys(v); const n = keys.length;
+    const tw = h('span', { class: 'tw' });
+    const sum = h('span', { class: 'jsum' });
+    const kids = h('div', { class: 'jkids' });
+    let open = false, built = false;
+    const set = (o) => {
+      open = o && n > 0;
+      tw.textContent = n ? (open ? '▾' : '▸') : ' ';
+      sum.textContent = isArr ? (open ? `[ ${n} items` : `[${n} items]`) : (open ? `{ ${n} keys` : `{${n} keys}`);
+      if (open && !built) { built = true; for (const k of keys) kids.append(jnode(k, v[k], depth + 1, openDepth, opts)); }
+      kids.hidden = !open;
+    };
+    const head = h('div', { class: 'jh' + (hl ? ' jchg' : ''), onclick: (e) => { e.stopPropagation(); set(!open); } }, tw, keyEl, sum);
+    set(depth < openDepth);
+    return h('div', null, head, kids);
+  }
+  let val;
+  if (typeof v === 'string') {
+    if (v.length > 1200 || v.split('\n').length > 15) val = h('div', { class: 'js', style: 'padding-left:14px' }, longText(v, { mono: true }));
+    else val = h('span', { class: 'js', text: '"' + v + '"' });
+  } else if (typeof v === 'number') val = h('span', { class: 'jnum', text: String(v) });
+  else if (typeof v === 'boolean') val = h('span', { class: 'jbool', text: String(v) });
+  else val = h('span', { class: 'jnull', text: v === undefined ? 'undefined' : 'null' });
+  return h('div', { class: hl ? 'jchg' : null }, h('span', { class: 'tw' }), keyEl, val);
+}
+
+function section(title, badges, open, build) {
+  const body = h('div', { class: 'sec-body' });
+  const tw = h('span', { class: 'tw' });
+  const badgeWrap = h('span', { style: 'display:contents' });
+  let built = false;
+  const set = (o) => { open = o; tw.textContent = open ? '▾' : '▸'; if (open && !built) { built = true; build(body); } body.hidden = !open; };
+  const head = h('div', { class: 'sec-head', onclick: () => set(!open) }, tw, h('span', { class: 'sec-title', text: title }), badgeWrap);
+  const el = h('section', { class: 'sec' }, head, body);
+  const api = {
+    el, body,
+    setBadges(b) { badgeWrap.replaceChildren(...[b].flat(Infinity).filter(Boolean)); },
+    rebuild() { if (built) { body.replaceChildren(); build(body); } },
+  };
+  api.setBadges(badges);
+  set(open);
+  return api;
+}
+const hb = (text, cls = '') => h('span', { class: 'hbadge ' + cls, text });
+
+// ---------- message cards (6.4) ----------
+function card(kind, label, icon, bodyNodes, opts = {}) {
+  const c = h('div', { class: 'card k-' + kind + (opts.hl ? ' hl' : '') });
+  const head = h('div', { class: 'card-head' }, h('span', { class: 'icon', text: icon }), h('span', { class: 'label', text: label }));
+  const body = h('div', { class: 'card-body' }, bodyNodes);
+  if (opts.collapsed) {
+    const prev = h('span', { class: 'preview', text: opts.preview || '' });
+    head.classList.add('clickable'); head.append(prev);
+    let open = false; body.hidden = true;
+    head.addEventListener('click', (e) => { e.stopPropagation(); open = !open; body.hidden = !open; prev.hidden = open; });
+  }
+  if (opts.meta) head.append(h('span', { class: 'meta' }, opts.meta));
+  c.append(head, body);
+  return c;
+}
+const oneLine = (s, n = 140) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
+const charMeta = (s) => `${fmtN(String(s || '').length)} chars`;
+
+function inputSummary(name, input) {
+  if (!isObj(input)) return typeof input === 'string' ? input : '';
+  const pick = { Bash: 'command', Read: 'file_path', Edit: 'file_path', Write: 'file_path', MultiEdit: 'file_path',
+                 NotebookEdit: 'notebook_path', Grep: 'pattern', Glob: 'pattern' }[name];
+  if (pick && typeof input[pick] === 'string') return input[pick];
+  for (const k of Object.keys(input)) if (typeof input[k] === 'string' && k !== 'description') return input[k];
+  return '';
+}
+
+// ctx: { mode: 'reply'|'new'|'conv', callsInView: Set }
+function renderBlock(b, role, ctx, siblings) {
+  if (!isObj(b)) return card('unknown', typeof b, '?', jsonTree(b));
+  try {
+    switch (b.type) {
+      case 'text': {
+        const t = b.text || '';
+        if (role === 'system') return card('sysmsg', 'SYSTEM (MID-CONVERSATION)', '⚙', longText(t), { collapsed: true, preview: oneLine(t), meta: charMeta(t) });
+        if (role === 'assistant') return card('model', 'MODEL', '◆', longText(t), { meta: charMeta(t) });
+        // Text the agent added (system reminders, or notes next to a tool result) is not something the user typed.
+        if (isReminder(t) || (siblings && siblings.some(s => isObj(s) && s.type === 'tool_result')))
+          return card('inject', 'INJECTED CONTEXT', '⋯', longText(t), { collapsed: true, preview: oneLine(t), meta: charMeta(t) });
+        return card('you', 'YOU', '●', longText(t), { meta: charMeta(t) });
+      }
+      case 'thinking':
+        return card('think', 'THINKING', '✻', b.thinking ? longText(b.thinking) : h('span', { class: 'muted', style: 'font-style:italic', text: 'hidden (signature only)' }),
+          { meta: (b.signature || b._signed) ? 'signed' : null });
+      case 'tool_use': case 'server_tool_use': return toolCallGroup(b, ctx);
+      case 'tool_result': {
+        const e = S.tools.get(b.tool_use_id);
+        if (ctx.mode === 'conv' && ctx.callsInView.has(b.tool_use_id))
+          return h('div', { class: 'stub', text: `↳ result of ${(e && e.name) || 'tool'}, shown with its call` });
+        return resultCard(b, e && e.name, null);
+      }
+      case 'tool_addition': {
+        const def = (b.tool && (b.tool.definition || b.tool)) || {};
+        return card('added', '+ TOOL ADDED: ' + (def.name || '?'), '+', [def.description ? longText(def.description) : null, h('div', { class: 'sublabel', text: 'definition' }), jsonTree(b.tool, 1)],
+          { collapsed: true, preview: oneLine(def.description, 90) });
+      }
+      case 'tool_reference':
+        return h('div', { class: 'loaded' }, 'LOADED TOOL: ', h('span', { text: b.tool_name || '?' }));
+      default:
+        return unknownCard(b);
+    }
+  } catch (e) { return unknownCard(b); }
+}
+const unknownCard = (b) => card('unknown', String((b && b.type) || 'unknown'), '?', jsonTree(b, 1));
+
+function toolCallGroup(b, ctx) {
+  const input = b.input;
+  const sum = inputSummary(b.name, input);
+  const desc = isObj(input) && typeof input.description === 'string' && input.description !== sum ? input.description : null;
+  const streaming = ctx.mode === 'reply' && b._done === false;
+  const body = [
+    sum ? h('div', { class: 'call-sum', text: sum.length > 600 ? sum.slice(0, 600) + '…' : sum }) : null,
+    desc ? h('div', { class: 'call-desc', text: desc }) : null,
+    b._parseError ? h('div', { class: 'warnline', text: 'input is not valid JSON (' + b._parseError + '); raw string below' }) : null,
+    b._parseError ? longText(b._raw, { mono: true }) : null,
+    streaming ? h('div', { class: 'note' }, h('span', { class: 'spin' }), ' input streaming… ', h('span', { class: 'mono', text: b._raw.slice(-200) })) : null,
+    !streaming && !b._parseError ? [h('div', { class: 'sublabel', text: 'input' }), jsonTree(input === undefined ? {} : input, 2)] : null,
+  ];
+  const c = card('call', 'TOOL CALL · ' + (b.name || '?'), '▶', body, { hl: F.tool && b.name === F.tool, meta: b.id ? h('span', { class: 'mono', text: b.id }) : null });
+  const g = h('div', { class: 'callgroup' }, c);
+  if (b.id && b.type === 'tool_use') {
+    const slot = { toolId: b.id, el: h('div', { class: 'slot' }), ctx };
+    UI.slots.push(slot); renderSlot(slot);
+    g.append(slot.el);
+  }
+  return g;
+}
+function renderSlot(slot) {
+  const e = S.tools.get(slot.toolId);
+  if (e && e.resultBlock) slot.el.replaceChildren(resultCard(e.resultBlock, e.name, e.resultExchangeId));
+  else slot.el.replaceChildren(h('div', { class: 'waiting', text: 'waiting for result…' }));
+}
+function resultCard(b, name, resultExId) {
+  const err = !!b.is_error;
+  const c = b.content;
+  const parts = typeof c === 'string' ? [{ type: 'text', text: c }] : Array.isArray(c) ? c : c == null ? [] : [c];
+  let chars = 0, lines = 0;
+  const body = parts.map(p => {
+    if (typeof p === 'string') p = { type: 'text', text: p };
+    if (!isObj(p)) return jsonTree(p);
+    if (p.type === 'text') { const t = p.text || ''; chars += t.length; lines += t.split('\n').length; return longText(t, { mono: true }); }
+    if (p.type === 'tool_reference') return h('div', { class: 'loaded' }, 'LOADED TOOL: ', h('span', { text: p.tool_name || '?' }));
+    if (p.type === 'image') return h('div', { class: 'note', text: `[image ${p.source && p.source.media_type || ''}]` });
+    return unknownCard(p);
+  });
+  if (!parts.length) body.push(h('div', { class: 'note', text: '(empty result)' }));
+  const meta = h('span', null,
+    parts.length > 1 ? `${parts.length} parts · ` : '', `${fmtN(chars)} chars${lines > 1 ? ', ' + fmtN(lines) + ' lines' : ''}`,
+    resultExId != null ? [' · ', h('button', { class: 'rlink', text: `result in #${resultExId}`, onclick: (e) => { e.stopPropagation(); goTo(resultExId); } })] : null);
+  return card(err ? 'error' : 'result', (err ? 'ERROR RESULT · ' : 'RESULT · ') + (name || '?'), err ? '✖' : '◀', body,
+    { hl: F.tool && name === F.tool, meta });
+}
+function goTo(id) {
+  setFollow(false); select(id);
+  const ex = S.ex.get(id);
+  if (ex && ex.rowEl && !ex.rowEl.hidden) ex.rowEl.scrollIntoView({ block: 'nearest' });
+}
+function renderMessage(m, i, ctx) {
+  const role = isObj(m) ? String(m.role || '?') : '?';
+  const blocks = blocksOf(m);
+  return h('div', { class: 'msg ' + role },
+    h('div', { class: 'msg-head' }, h('b', { text: '#' + i }), ' · ' + role, typeof (m && m.content) === 'string' ? h('span', { class: 'muted', text: ' · string content' }) : null),
+    blocks.map(b => renderBlock(b, role, ctx, blocks)));
+}
+function callsIn(msgs) {
+  const s = new Set();
+  for (const m of msgs) for (const b of blocksOf(m)) if (isObj(b) && b.type === 'tool_use' && b.id) s.add(b.id);
+  return s;
+}
+
+// ---------- detail pane (6.3) ----------
+let D = null;  // handles into the currently displayed detail
+function buildDetail(ex) {
+  const root = $('detail');
+  UI.slots = [];
+  UI.displayedId = ex ? ex.id : null;
+  root.replaceChildren(); root.scrollTop = 0;
+  D = null;
+  if (!ex) { root.append(h('div', { class: 'empty', text: 'Waiting for traffic. The newest main request will show here.' })); return; }
+  D = { ex, ver: ex.ver, summary: h('div', { class: 'summary' }) };
+  root.append(D.summary);
+  renderSummary(ex);
+  const b = ex.body;
+  const msgs = ex.msgs, ns = ex.diff.newStart, newMsgs = msgs.slice(ns);
+
+  if (b && Array.isArray(b.messages)) {
+    const badges = [hb(`+${newMsgs.length} ${newMsgs.length === 1 ? 'msg' : 'msgs'}`)];
+    if (ex.diff.historyChanged) badges.push(hb(`history changed at message #${ex.diff.L}`, 'chg'));
+    root.append(section('New this turn', badges, true, (body) => {
+      if (ex.diff.historyChanged) body.append(h('div', { class: 'warnline', text: `History changed at message #${ex.diff.L}: the earlier messages differ from the previous request in this thread (e.g. compaction or cleared thinking).` }));
+      if (!newMsgs.length) body.append(h('div', { class: 'note', text: 'No new messages (same conversation as the previous request).' }));
+      const ctx = { mode: 'new', callsInView: callsIn(newMsgs) };
+      newMsgs.forEach((m, k) => body.append(renderMessage(m, ns + k, ctx)));
+    }).el);
+  }
+
+  D.reply = section('Reply', replyBadges(ex), true, (body) => buildReply(body, ex));
+  root.append(D.reply.el);
+
+  if (b && Array.isArray(b.messages)) {
+    root.append(section(`Conversation (${msgs.length} messages)`, null, true, (body) => {
+      const ctx = { mode: 'conv', callsInView: callsIn(msgs) };
+      const L = ex.diff.prevId != null ? Math.min(ex.diff.L, msgs.length) : 0;
+      if (L > 0) {
+        const holder = h('div');
+        const btn = h('button', { class: 'group-toggle', text: `▸ ${L} earlier message${L === 1 ? '' : 's'} (already in #${ex.diff.prevId})` });
+        let open = false, built = false;
+        btn.addEventListener('click', () => {
+          open = !open;
+          if (open && !built) { built = true; for (let i = 0; i < L; i++) holder.append(renderMessage(msgs[i], i, ctx)); }
+          holder.hidden = !open;
+          btn.textContent = `${open ? '▾' : '▸'} ${L} earlier message${L === 1 ? '' : 's'} (already in #${ex.diff.prevId})`;
+        });
+        holder.hidden = true;
+        body.append(btn, holder);
+      }
+      for (let i = L; i < msgs.length; i++) body.append(renderMessage(msgs[i], i, ctx));
+    }).el);
+  }
+
+  if (b && b.system !== undefined) {
+    const blocks = systemBlocks(b.system);
+    const total = blocks.reduce((a, x) => a + String(x.text || '').length, 0);
+    const ch = ex.diff.systemChanged;
+    root.append(section('System instructions', [hb(`${blocks.length} block${blocks.length === 1 ? '' : 's'}`), hb(`${fmtN(total)} chars`),
+      ch == null ? hb('first in thread') : ch ? hb('changed', 'chg') : hb('unchanged')], false, (body) => {
+      if (ch) {
+        const prev = S.ex.get(ex.diff.prevId);
+        const wrap = h('div');
+        const btn = h('button', { class: 'link', text: `show diff against #${ex.diff.prevId}`, onclick: () => {
+          if (wrap.childNodes.length) { wrap.replaceChildren(); btn.textContent = `show diff against #${ex.diff.prevId}`; return; }
+          const txt = (bl) => systemBlocks(bl).map((x, i) => `--- block ${i + 1} ---\n` + (typeof x.text === 'string' ? x.text : stable(x))).join('\n');
+          wrap.append(renderDiff(txt(prev && prev.body && prev.body.system), txt(b.system))); btn.textContent = 'hide diff';
+        } });
+        body.append(btn, wrap);
+      }
+      blocks.forEach((x, i) => {
+        const t = typeof x.text === 'string' ? x.text : null;
+        const bodyEl = h('div', { class: 'sysblk-body' }, t != null ? h('div', { class: 'txt', text: t }) : jsonTree(x), t ? h('div', { class: 'lt-tools' }, copyBtn(t)) : null);
+        const tw = h('span', { class: 'tw', text: '▾' });
+        const headEl = h('div', { class: 'sysblk-head', onclick: () => { bodyEl.hidden = !bodyEl.hidden; tw.textContent = bodyEl.hidden ? '▸' : '▾'; } },
+          tw, h('b', { text: `Block ${i + 1}` }), h('span', { class: 'muted', text: `${fmtN((t || '').length)} chars` }),
+          x.cache_control ? h('span', { class: 'tag', title: stable(x.cache_control), text: 'cache' }) : null,
+          h('span', { class: 'muted', style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0', text: oneLine(t, 80) }));
+        body.append(h('div', { class: 'sysblk' }, headEl, bodyEl));
+      });
+    }).el);
+  }
+
+  if (b && Array.isArray(b.tools)) {
+    const td = ex.diff.tools;
+    let badges;
+    if (!td) badges = [hb(`${b.tools.length} tools`)];
+    else if (!td.added.length && !td.removed.length && !td.changed.length) badges = [hb(`unchanged (${b.tools.length})`)];
+    else badges = [...td.added.map(n => hb('+' + n, 'add')), ...td.removed.map(n => hb('−' + n, 'del')), ...td.changed.map(n => hb('~' + n, 'chg'))];
+    root.append(section(`Tools (${b.tools.length})`, badges, false, (body) => {
+      for (const t of b.tools) {
+        if (!isObj(t)) { body.append(jsonTree(t)); continue; }
+        const d1 = String(t.description || '').split('\n').find(l => l.trim()) || '';
+        const det = h('div', { class: 'tool-detail' }); det.hidden = true; let built = false;
+        const line = h('div', { class: 'tool-line', onclick: () => {
+          if (!built) { built = true; det.append(longText(t.description || ''), h('div', { class: 'sublabel', text: 'input_schema' }), jsonTree(t.input_schema, 2),
+            h('div', { class: 'sublabel', text: 'other fields' }), jsonTree(Object.fromEntries(Object.entries(t).filter(([k]) => !['description', 'input_schema'].includes(k))), 1)); }
+          det.hidden = !det.hidden;
+        } }, h('span', { class: 'nm', text: t.name || '?' }),
+          t.defer_loading ? h('span', { class: 'tag def', text: 'deferred' }) : null,
+          td && td.added.includes(t.name) ? h('span', { class: 'tag new', text: 'added' }) : null,
+          td && td.changed.includes(t.name) ? h('span', { class: 'tag', text: 'changed' }) : null,
+          h('span', { class: 'd1', text: d1 }));
+        body.append(line, det);
+      }
+      if (td && td.removed.length) body.append(h('div', { class: 'note', text: 'Removed since previous: ' + td.removed.join(', ') }));
+    }).el);
+  }
+
+  if (b) {
+    const params = Object.fromEntries(Object.entries(b).filter(([k]) => !['messages', 'system', 'tools'].includes(k)));
+    const changed = ex.diff.paramsChanged || [];
+    root.append(section('Request parameters', changed.length ? [hb('changed: ' + changed.join(', '), 'chg')] : ex.diff.paramsChanged ? [hb('unchanged')] : null, false,
+      (body) => body.append(jsonTree(params, 2, { highlight: new Set(changed) }))).el);
+  }
+
+  D.headers = section('Headers', null, false, (body) => {
+    const table = (rows) => h('table', { class: 'hdrs' }, rows.map(([k, v]) => h('tr', null, h('td', { text: k }), h('td', { text: v }))));
+    body.append(h('h4', { text: `Request: ${ex.method} ${ex.path}` }), table(ex.headers));
+    body.append(h('h4', { text: ex.start ? `Response: ${ex.start.status} ${ex.start.reason || ''}` : 'Response: (none yet)' }));
+    if (ex.start) body.append(table(ex.start.headers || []));
+  });
+  root.append(D.headers.el);
+
+  D.raw = section('Raw', null, false, (body) => {
+    body.append(h('h4', { text: 'Request body' }));
+    if (ex.bodyAny != null) body.append(jsonTree(ex.bodyAny, 1));
+    else body.append(ex.bodyText ? longText(ex.bodyText, { mono: true }) : h('div', { class: 'note', text: '(no body)' }));
+    body.append(h('h4', { text: `Response text (${fmtN(ex.raw.length)} chars)` }));
+    body.append(ex.raw ? longText(ex.raw, { mono: true }) : h('div', { class: 'note', text: '(no body)' }));
+    if (ex.end && ex.end.error) body.append(h('div', { class: 'errline', text: 'response_end: ' + ex.end.error }));
+  });
+  root.append(D.raw.el);
+}
+function refreshDetail(ex) {
+  if (!D || D.ex !== ex || D.ver === ex.ver) return;
+  D.ver = ex.ver;
+  renderSummary(ex);
+  D.reply.setBadges(replyBadges(ex));
+  D.reply.rebuild();
+  UI.slots = UI.slots.filter(s => s.el.isConnected);  // drop slots of the replaced reply
+  D.headers.rebuild();
+  D.raw.rebuild();
+}
+function replyBadges(ex) {
+  const r = ex.reply, out = [];
+  const calls = r.blocks.filter(b => b && b.type === 'tool_use').length;
+  if (!ex.end && (ex.start || ex.raw)) out.push(hb('streaming…'));
+  if (!ex.start && !ex.end) out.push(hb('pending'));
+  if (calls) out.push(hb(`${calls} tool call${calls === 1 ? '' : 's'}`));
+  if (r.blocks.length) out.push(hb(`${r.blocks.filter(Boolean).length} blocks`));
+  if (failed(ex)) out.push(hb(ex.kind === 'probe' ? 'error reply (probe, not counted)' : 'error', 'err'));
+  return out;
+}
+function renderSummary(ex) {
+  const r = ex.reply, u = r.usage || {};
+  const st = ex.start;
+  const th = ex.thread && ex.thread.letter ? ex.thread : (S.sessionLetter.get(ex.session) || null);
+  const kv = (k, v) => h('span', null, h('span', { class: 'k', text: k + ' ' }), v);
+  const s1 = h('div', { class: 's1' },
+    h('span', { class: 'big', text: '#' + ex.id }), threadChip(ex),
+    h('span', { text: th ? `thread ${th.letter}` : 'no thread', class: 'muted' }),
+    h('span', { class: 'kindlbl', text: ex.label || 'main' }), statusBadge(ex),
+    st ? h('span', { class: 'muted', text: st.reason || '' }) : null,
+    h('span', { class: 'mono', text: r.model || (ex.body && ex.body.model) || '' }),
+    r.stop ? kv('stop_reason', h('b', { text: r.stop })) : null,
+    h('span', { class: 'muted', text: `${ex.method} ${ex.path} · ${fmtTime(ex.t0)}` }));
+  const total = ex.end ? ex.end.t - ex.t0 : null, ttfb = st ? st.t - ex.t0 : null, stream = ex.end && st ? ex.end.t - st.t : null;
+  const s2 = h('div', { class: 's2' },
+    kv('total', fmtDur(total)), kv('first byte', fmtDur(ttfb)), kv('stream', fmtDur(stream)),
+    kv('input', fmtN(u.input_tokens)), kv('cache write', fmtN(u.cache_creation_input_tokens)), kv('cache read', fmtN(u.cache_read_input_tokens)),
+    kv('output', fmtN(u.output_tokens) + (u.output_tokens_details && u.output_tokens_details.thinking_tokens ? ` (${fmtN(u.output_tokens_details.thinking_tokens)} thinking)` : '')),
+    kv('context', fmtN(ctxSize(u))));
+  const extra = [];
+  if (ex.diff.historyChanged) extra.push(h('div', { class: 'warnline', text: `History changed at message #${ex.diff.L}.` }));
+  if (r.stop === 'max_tokens') extra.push(h('div', { class: 'warnline', text: 'Warning: the reply stopped at max_tokens.' }));
+  if (ex.toolErrorIds.length) extra.push(h('div', { class: 'warnline', text: `Tool error: ${ex.toolErrorIds.length} tool result${ex.toolErrorIds.length > 1 ? 's' : ''} with is_error in this request (the API call itself succeeded).` }));
+  if (failed(ex)) extra.push(h('div', { class: 'errline', text: errorText(ex) + (ex.kind === 'probe' ? ' — expected for a probe; not counted as an error.' : '') }));
+  for (const w of r.warnings.slice(0, 5)) extra.push(h('div', { class: 'warnline', text: w }));
+  D.summary.replaceChildren(s1, s2, ...extra);
+}
+function errorText(ex) {
+  const r = ex.reply;
+  if (r.error) return `${r.error.type || 'error'}: ${r.error.message || ''}${r.error.request_id ? ' (' + r.error.request_id + ')' : ''}`;
+  if (ex.start && ex.start.status >= 400) return `HTTP ${ex.start.status} ${ex.start.reason || ''}` + (ex.end && ex.end.error ? ' — ' + ex.end.error : '');
+  if (ex.end && ex.end.ok === false) return 'Failed: ' + (ex.end.error || 'unknown error');
+  if (ex.end && ex.sse && !r.complete) return 'The stream ended without message_stop.';
+  return 'Error';
+}
+function buildReply(body, ex) {
+  const r = ex.reply;
+  if (!ex.start && !ex.end) { body.append(h('div', { class: 'note' }, h('span', { class: 'spin' }), ' waiting for the response…')); return; }
+  if (failed(ex)) {
+    const box = h('div', { class: 'errbox' });
+    if (r.error) box.append(h('div', null, 'type ', h('b', { text: r.error.type || '?' })), h('div', null, 'message ', h('b', { text: r.error.message || '' })),
+      r.error.request_id ? h('div', null, 'request_id ', h('b', { text: r.error.request_id })) : null);
+    else box.append(h('div', { text: errorText(ex) }));
+    if (r.error && ex.end && ex.end.error) box.append(h('div', { text: ex.end.error }));
+    body.append(box);
+  }
+  if (r.blocks.length) {
+    const blocks = r.blocks.filter(Boolean);
+    const ctx = { mode: 'reply', callsInView: new Set() };
+    body.append(h('div', { class: 'msg assistant' },
+      h('div', { class: 'msg-head' }, h('b', { text: 'reply' }), ' · assistant', r.msgId ? h('span', { class: 'mono', text: ' · ' + r.msgId }) : null),
+      blocks.map(b => renderBlock(b, 'assistant', ctx, blocks))));
+  } else if (r.text != null) body.append(longText(r.text, { mono: true }));
+  else if (r.json != null) body.append(jsonTree(r.json, 2));
+  else if (!ex.sse && ex.raw && !ex.end) body.append(longText(ex.raw, { mono: true }));
+  else if (!ex.raw && ex.end) body.append(h('div', { class: 'note', text: ex.method === 'HEAD' ? '(HEAD: no body)' : '(empty body)' }));
+  if (!ex.end && ex.start) body.append(h('div', { class: 'note' }, h('span', { class: 'spin' }), ' streaming…'));
+}
+
+// ---------- line diff ----------
+function renderDiff(a, b) {
+  const A = (a || '').split('\n'), B = (b || '').split('\n');
+  let p = 0; while (p < A.length && p < B.length && A[p] === B[p]) p++;
+  let s = 0; while (s < A.length - p && s < B.length - p && A[A.length - 1 - s] === B[B.length - 1 - s]) s++;
+  const a2 = A.slice(p, A.length - s), b2 = B.slice(p, B.length - s);
+  let ops = [];
+  if (a2.length * b2.length > 4e6) ops = [...a2.map(x => ['d', x]), ...b2.map(x => ['a', x])];
+  else {
+    const n = a2.length, m = b2.length, dp = new Uint32Array((n + 1) * (m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+      dp[i * (m + 1) + j] = a2[i] === b2[j] ? dp[(i + 1) * (m + 1) + j + 1] + 1 : Math.max(dp[(i + 1) * (m + 1) + j], dp[i * (m + 1) + j + 1]);
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a2[i] === b2[j]) { ops.push(['c', a2[i]]); i++; j++; }
+      else if (dp[(i + 1) * (m + 1) + j] >= dp[i * (m + 1) + j + 1]) ops.push(['d', a2[i++]]);
+      else ops.push(['a', b2[j++]]);
+    }
+    while (i < n) ops.push(['d', a2[i++]]);
+    while (j < m) ops.push(['a', b2[j++]]);
+  }
+  const el = h('div', { class: 'diff' });
+  const line = (cls, pre, t) => el.append(h('div', { class: cls, text: pre + t }));
+  if (p > 3) el.append(h('div', { class: 'gap', text: `… ${p - 3} unchanged lines` }));
+  for (let i = Math.max(0, p - 3); i < p; i++) line('c', '  ', A[i]);
+  for (const [k, t] of ops) line(k, k === 'a' ? '+ ' : k === 'd' ? '- ' : '  ', t);
+  for (let i = B.length - s; i < Math.min(B.length, B.length - s + 3); i++) line('c', '  ', B[i]);
+  if (s > 3) el.append(h('div', { class: 'gap', text: `… ${s - 3} unchanged lines` }));
+  if (!ops.length) el.append(h('div', { class: 'gap', text: 'no line differences (whitespace or cache_control only)' }));
+  return el;
+}
+
+// ---------- connection ----------
+function handle(ev) {
+  switch (ev.type) {
+    case 'reset':
+      freshState();
+      list.replaceChildren(); $('emptyList').hidden = false;
+      UI.newCount = 0; updatePill(); UI.slots = []; UI.displayedId = null;
+      UI.detailDirty = true; UI.totalsDirty = true; UI.toolsDirty = true; UI.dirtyRows.clear();
+      schedule(); break;
+    case 'request': onRequest(ev); break;
+    case 'response_start': onStart(ev); break;
+    case 'response_chunk': onChunk(ev); break;
+    case 'response_end': onEnd(ev); break;
+  }
+}
+function setLive(on) {
+  $('live').className = on ? 'on' : 'off';
+  $('liveText').textContent = on ? 'live' : 'reconnecting…';
+}
+let es = null;
+function connect() {
+  es = new EventSource('/__events');
+  es.onopen = () => setLive(true);
+  es.onerror = () => {
+    setLive(false);
+    if (es.readyState === EventSource.CLOSED) { es = null; setTimeout(connect, 2000); }  // the browser gave up: retry ourselves
+  };
+  es.onmessage = (e) => {
+    let ev; try { ev = JSON.parse(e.data); } catch (_) { return; }
+    try { handle(ev); } catch (err) { console.error('event failed', ev && ev.type, err); }
+  };
+}
+
+// ---------- controls ----------
+$('toolFilter').addEventListener('change', (e) => { F.tool = e.target.value; refilter(); });
+$('errorsOnly').addEventListener('change', (e) => { F.errorsOnly = e.target.checked; refilter(); });
+$('hideSide').addEventListener('change', (e) => { F.hideSide = e.target.checked; refilter(); });
+$('follow').addEventListener('change', (e) => setFollow(e.target.checked));
+$('newPill').addEventListener('click', () => { listPane.scrollTop = 0; });
+listPane.addEventListener('scroll', () => { if (listAtTop() && UI.newCount) { UI.newCount = 0; updatePill(); } });
+document.addEventListener('keydown', (e) => {
+  if (e.target.closest('input,select,textarea') || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'j' && e.key !== 'k')) return;
+  const rows = [...list.children].filter(r => !r.hidden);
+  if (!rows.length) return;
+  let i = rows.findIndex(r => Number(r.dataset.id) === UI.displayedId);
+  i = (e.key === 'ArrowDown' || e.key === 'j') ? Math.min(rows.length - 1, i + 1) : Math.max(0, i - 1);
+  e.preventDefault(); setFollow(false); select(Number(rows[i].dataset.id)); rows[i].scrollIntoView({ block: 'nearest' });
+});
+
+connect();
+schedule();
+</script>
+</body>
+</html>

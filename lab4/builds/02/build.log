@@ -1,0 +1,29 @@
+I've built the dashboard, but none of it has been run. This session needs approval for every command, even `python3 -m py_compile`, so I couldn't start the proxy or open the page. I checked both files only by reading them.
+
+To run it:
+```
+python3 proxy.py --demo
+open http://localhost:8041/__dashboard
+```
+Then go through the acceptance checks in section 10 of `SPEC.md`.
+
+**`proxy.py`**
+- **Forwarding:** relaying is unchanged: same `SKIP` set, replies still stream back chunk by chunk, and traffic prints to the terminal in the same format. `/__` routes are handled locally and never printed.
+- **Exchange ids and store:** every relayed request gets an id. The last 500 exchanges are kept in memory behind a lock.
+- **Events:** the four event types go out on `/__events`, with credentials shortened as in the terminal and a per-exchange UTF‑8 decoder. `response_end` is always sent, including after an exception or when the agent disconnects.
+- **Connected pages:**
+  - A new page gets `reset` first, then a replay of everything stored, then live events.
+  - Each page has its own queue, and a page whose queue reaches 1000 items is dropped.
+  - Keepalives go out every 15 s.
+- **`--demo`:** replays every item in section 9 through the same code path as real traffic:
+  - The quota probe and title call run at the same time, with their replies interleaved.
+  - Six main requests follow, ending with the broken stream, then the 502.
+  - Chunks are cut mid-line, and some data lines have trailing spaces.
+  - It loops every pass with fresh ids. Each pass uses a new session, so it appears as a new thread (B, C, …).
+
+**`dashboard.html`** is plain JS with no external requests. Data only goes in through `textContent`/`createElement`, so the `<script>alert(1)</script>` result shows as plain text. It covers the reply rebuild from the stream, threads and "new this turn", call/result pairing that updates live, the colored card scheme, the three error levels, the filters and the totals bar, as the spec describes.
+
+Three things I decided where the spec left room:
+- **Thread letters:** letters go to main threads only, so the real session is `A` (check 17). Under the spec's literal "order of first appearance", the quota probe would have taken `A`. Side calls and probes show their session's letter in a faded chip.
+- **"Tool loaded." text:** text sitting next to a `tool_result` gets the grey `INJECTED CONTEXT` label instead of `YOU`, because the user didn't type it.
+- **Extra startup line:** the proxy prints one more line at startup with the dashboard URL. Traffic output is unchanged.
