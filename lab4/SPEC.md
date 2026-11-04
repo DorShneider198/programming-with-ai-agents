@@ -490,10 +490,21 @@ an icon character. The colors and labels are fixed:
 Inside each card:
 
 - **Tool call card:**
-  - a one-line summary of the input in monospace: `Bash` → `command`;
+  - the optional `description` field, right after the label in the header
+    (`TOOL CALL · Bash — Remove pre-lab build, commit, and push`). It is the
+    agent's own plain-language summary, so it is what the reader scans first.
+  - a summary of the input in monospace: `Bash` → `command`;
     `Read`/`Edit`/`Write` → `file_path`; `Grep`/`Glob` → `pattern`; otherwise
-    the first string field
-  - the optional `description` field in grey
+    the first string field. It is **exactly one line, always**: newlines are
+    shown as `⏎`, runs of spaces are collapsed, and the line is cut at the
+    card's width with an ellipsis (`white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis`). Real `Bash` commands often hold a whole
+    heredoc (a commit message, a script); in a live session one summary
+    wrapped onto 6 lines and pushed the result off screen.
+  - when the summarized value is longer than the line, or has a newline, a
+    `full command` toggle (`full value` for other tools) shows it in
+    monospace with `white-space: pre-wrap` and the original line breaks,
+    clamped like long text
   - the full input as a JSON tree under "input"
 - **Result card:** monospace, `white-space: pre-wrap`, and the result length.
   An array result shows each part.
@@ -587,7 +598,8 @@ The sample must include, using the shapes in section 3:
    2. The `Read` tool_result (string content). The reply is model text.
    3. A new user prompt given as a **plain string**, after the previous request
       had it as an array. The reply holds **two parallel** `Bash` tool_use
-      blocks.
+      blocks, each with a `description`. One `command` is a multi-line heredoc
+      of about 12 lines (`git commit -F - <<'EOF'` ... `EOF`).
    4. Both results: one normal, and one with `is_error: true`. The reply is
       text plus a `ToolSearch` call.
    5. A tool_result whose content is `[{"type":"tool_reference","tool_name":"TaskStop"}]`
@@ -647,7 +659,10 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
     shows "reconnecting", and restarting it reconnects by itself.
 15. A tool result containing `<b>hi</b><script>alert(1)</script>` shows as
     literal text. No alert appears and nothing turns bold.
-16. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
+16. In request 3's reply, each `Bash` card shows its `description` in the
+    header and its command on exactly one line, the heredoc one ending in an
+    ellipsis with `⏎` marks. `full command` shows it with its line breaks.
+17. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
     `suggested next prompt: "now read SPEC.md"`, and disappears with **Hide
     side calls**. Main request 3 shows no "history changed" warning, and its
     "New this turn" does not include the suggestion message.
@@ -655,7 +670,7 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
 With a real agent (`ANTHROPIC_BASE_URL=http://localhost:8041 claude`, then ask
 it to read a file):
 
-17. The agent works exactly as without the dashboard. The terminal still prints
+18. The agent works exactly as without the dashboard. The terminal still prints
     the same output, and `/__` requests are not printed.
-18. The real session shows up as main thread `A`, with its title call and
+19. The real session shows up as main thread `A`, with its title call and
     probes as side rows. The `Read` call pairs with its result.
