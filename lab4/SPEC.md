@@ -363,8 +363,9 @@ Two panes:
 
 - **Top bar** (sticky):
   - live/reconnecting dot
-  - totals: requests, errors, input tokens (fresh / cache write / cache read),
-    output tokens, tool calls
+  - totals: requests, **errors**, **tool errors**, input tokens (fresh / cache
+    write / cache read), output tokens, tool calls. The two error counts follow
+    the levels in 6.5 and are never added together.
   - **Tool filter** dropdown: "all tools" or one tool name, built from every
     tool name seen
   - **Errors only** toggle
@@ -397,7 +398,11 @@ Display states:
 
 - Side and probe rows: opacity 0.55, with their label. Hidden when **Hide side
   calls** is on.
-- Error rows: a red 4px left border and a red badge.
+- Error rows (level 1 in 6.5): a red 4px left border and a red badge.
+- Tool-error rows (level 2): an amber 4px left border and an amber
+  `tool error` chip on line 2. The status badge stays green `200`.
+- Probe rows keep their status badge color (a quota probe shows a red `429`)
+  but get no red border, because that reply is expected.
 - Exchanges still streaming: a pulsing badge.
 
 Scrolling:
@@ -492,10 +497,19 @@ left, user messages are not. This makes the back-and-forth easy to scan.
 - **Tool filter X:** show only exchanges whose reply calls X, or whose new
   messages contain a result of X. In the detail pane, cards for X get a thin
   outline.
-- **Errors only:** status ≥ 400, `response_end.ok == false`, a stream with no
-  `message_stop`, an SSE `error` event, a request whose new messages contain an
-  `is_error` result, or `stop_reason == "max_tokens"` (shown as a warning, in
-  amber).
+- **Errors only:** shows exchanges at any of these three levels. They are
+  different things and must look different:
+  1. **Error (red), counted in "errors":** the exchange itself failed. Status
+     ≥ 400, `response_end.ok == false`, a stream with no `message_stop`, or an
+     SSE `error` event. **Probes are never counted**: the agent sends them as
+     side calls and a `429` on a quota probe is normal (in a real capture, the
+     only "error" of a healthy session was that probe).
+  2. **Tool error (amber), counted in "tool errors":** the API call succeeded
+     (`200`), but its new messages contain an `is_error` tool result, i.e. a
+     tool the agent ran failed (a command exited non-zero, a permission was
+     denied). This is the agent's work failing, not the traffic. Count each
+     `tool_use_id` once, in the first request that carries its result.
+  3. **Warning (amber, not counted):** `stop_reason == "max_tokens"`.
 
 ## 7. Decisions
 
@@ -564,11 +578,11 @@ The sample must include, using the shapes in section 3:
       `tools`. The reply is a final text answer with `stop_reason:"end_turn"`.
    6. A request whose reply stream stops without `message_stop`, ending with
       `response_end ok:false`.
-4. One request to an unreachable upstream (`502`, `ok:false`).
+4. One main request (with `tools`) to an unreachable upstream (`502`, `ok:false`).
 5. Realistic usage numbers (e.g. `cache_creation_input_tokens: 30315`, then
    cache reads on later turns), real-looking `toolu_`/`msg_`/`req_` ids, and
    one tool result longer than 100 lines. One tool result must contain the
-   literal text `<b>hi</b><script>alert(1)</script>`, for check 14.
+   literal text `<b>hi</b><script>alert(1)</script>`, for check 15.
 
 ## 10. Acceptance checks (all doable by looking at the page)
 
@@ -591,7 +605,8 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
 6. Request 3's reply shows two `Bash` calls, each with its own result
    underneath. The failing call's card shows its result in red
    (`ERROR RESULT · Bash`). **Errors only** shows request 4 of the main thread,
-   the request that carries the `is_error` result.
+   the request that carries the `is_error` result, with an amber border and a
+   `tool error` chip, not a red border.
 7. "New this turn" shows only the new messages (e.g. `+2 msgs`), not the whole
    history. The string/array switch in request 3 does **not** cause a "history
    changed" warning.
@@ -603,16 +618,19 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
     durations. The top bar totals grow as exchanges arrive.
 11. The broken stream (request 6) and the 502 are marked as errors. No row
     stays "pending" forever.
-12. The tool filter set to `Bash` shows only exchanges involving Bash.
-13. Reloading the page brings back all exchanges so far. Stopping the proxy
+12. After one pass of the demo the top bar shows **2 errors** (the broken stream
+    and the 502) and **1 tool error** (main request 4). The quota probe's `429`
+    is red on its own row but is not counted and has no red border.
+13. The tool filter set to `Bash` shows only exchanges involving Bash.
+14. Reloading the page brings back all exchanges so far. Stopping the proxy
     shows "reconnecting", and restarting it reconnects by itself.
-14. A tool result containing `<b>hi</b><script>alert(1)</script>` shows as
+15. A tool result containing `<b>hi</b><script>alert(1)</script>` shows as
     literal text. No alert appears and nothing turns bold.
 
 With a real agent (`ANTHROPIC_BASE_URL=http://localhost:8041 claude`, then ask
 it to read a file):
 
-15. The agent works exactly as without the dashboard. The terminal still prints
+16. The agent works exactly as without the dashboard. The terminal still prints
     the same output, and `/__` requests are not printed.
-16. The real session shows up as main thread `A`, with its title call and
+17. The real session shows up as main thread `A`, with its title call and
     probes as side rows. The `Read` call pairs with its result.
