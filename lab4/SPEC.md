@@ -79,6 +79,15 @@ The capture contains three kinds of side call:
   "json_schema", "schema": {"type": "object", "properties": {"title": {"type":
   "string"}}, ...}}}`. The reply is streamed text that is JSON:
   `{"title":"Proxy.py summary"}`.
+- **Prompt suggestion**: after the model finishes a turn, the agent predicts
+  what the user will type next. This request **looks like a main request**:
+  same session, same `system`, the full `tools` array, the whole conversation.
+  The only difference is one extra user message at the end whose text starts
+  with `[SUGGESTION MODE: Suggest what the user might naturally type next into
+  Claude Code.]`. The reply is a short text such as `push the changes`, which
+  reads like a user prompt but was never sent by the user. The next real
+  request does **not** contain the suggestion message or its reply. In a live
+  session these made up about 1 in 8 requests.
 
 The main agent requests have a non-empty `tools` array (about 20 tools).
 
@@ -277,6 +286,7 @@ Classify each exchange:
 |---|---|---|
 | probe | method is not `POST`, or path does not start with `/v1/messages` | `probe` |
 | probe | `max_tokens == 1` | `probe: quota` |
+| side | the last message is a user message whose last text block starts with `[SUGGESTION MODE:` (checked before `tools`, because these requests carry the full tool list) | `side: suggestion` |
 | side | `tools` missing or empty | `side: <name>`, where name is the first property of `output_config.format.schema.properties` if present (→ `side: title`), else `side` |
 | main | non-empty `tools` | none |
 
@@ -302,7 +312,12 @@ To compare messages between requests:
 
 ### 5.3 "New this turn" and "changed since previous"
 
-For a request R in thread T, P is the previous request in T.
+For a request R in thread T, P is the previous **main** request in T. Side
+calls (including `side: suggestion`) are never used as P, and are never P for
+anything: a suggestion call has an extra message at the end that the next real
+request does not have, so using it as P would show a false "history changed"
+warning on every turn. A side call's own "New this turn" is just its last user
+message.
 
 - **New this turn** = `R.messages` from index L onward, where L is the length
   of the longest common prefix of the normalized `P.messages` and
@@ -396,7 +411,9 @@ One compact row of 2 lines:
 
 Display states:
 
-- Side and probe rows: opacity 0.55, with their label. Hidden when **Hide side
+- Side and probe rows: opacity 0.55, with their label. A `side: suggestion`
+  row's line 2 reads `suggested next prompt: "<reply text>"`, in italics, so it
+  is never mistaken for something the user typed. Hidden when **Hide side
   calls** is on.
 - Error rows (level 1 in 6.5): a red 4px left border and a red badge.
 - Tool-error rows (level 2): an amber 4px left border and an amber
@@ -578,6 +595,10 @@ The sample must include, using the shapes in section 3:
       `tools`. The reply is a final text answer with `stop_reason:"end_turn"`.
    6. A request whose reply stream stops without `message_stop`, ending with
       `response_end ok:false`.
+
+   Right after request 2's reply, a **prompt-suggestion** side call (3.2): the
+   messages of request 2, plus its reply, plus a `[SUGGESTION MODE: ...]` user
+   message, with the full tools. Its reply streams the text `now read SPEC.md`.
 4. One main request (with `tools`) to an unreachable upstream (`502`, `ok:false`).
 5. Realistic usage numbers (e.g. `cache_creation_input_tokens: 30315`, then
    cache reads on later turns), real-looking `toolu_`/`msg_`/`req_` ids, and
@@ -626,11 +647,15 @@ Run `python3 proxy.py --demo` and open `http://localhost:8041/__dashboard`:
     shows "reconnecting", and restarting it reconnects by itself.
 15. A tool result containing `<b>hi</b><script>alert(1)</script>` shows as
     literal text. No alert appears and nothing turns bold.
+16. The prompt-suggestion call is dimmed and labelled `side: suggestion`, shows
+    `suggested next prompt: "now read SPEC.md"`, and disappears with **Hide
+    side calls**. Main request 3 shows no "history changed" warning, and its
+    "New this turn" does not include the suggestion message.
 
 With a real agent (`ANTHROPIC_BASE_URL=http://localhost:8041 claude`, then ask
 it to read a file):
 
-16. The agent works exactly as without the dashboard. The terminal still prints
+17. The agent works exactly as without the dashboard. The terminal still prints
     the same output, and `/__` requests are not printed.
-17. The real session shows up as main thread `A`, with its title call and
+18. The real session shows up as main thread `A`, with its title call and
     probes as side rows. The `Read` call pairs with its result.
