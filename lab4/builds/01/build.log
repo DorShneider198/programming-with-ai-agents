@@ -1,0 +1,36 @@
+I've written both files, but I haven't run either one. Running scripts needed approval that this session couldn't get: `python3 --version` worked, but `py_compile`, starting the proxy and a JavaScript syntax check were all blocked. Node isn't installed. Everything below comes from reading the code line by line, not from watching the page work.
+
+**What I built**
+- **`proxy.py`** forwards traffic the same way as before: same `SKIP` set, chunk-by-chunk streaming, same terminal output. On top of that it now:
+  - gives every exchange an id and keeps the last 500 in memory, behind a lock;
+  - serves `/__dashboard` (read from disk on every request) and `/__events`;
+  - sends each page a reset and a replay when it connects, then live events;
+  - drops a page whose queue reaches 1000 items, and sends a keepalive every 15 s;
+  - always sends `response_end`, because it's in a `finally`;
+  - has a `--demo` flag that plays the sample from section 9 through the same functions as real traffic, then loops with new ids every pass.
+- **`dashboard.html`** is one self-contained page that loads nothing from outside and never uses `innerHTML`. All interpretation from section 5 (parsing, threads, pairing, diffs, stats) happens in the page, and it has the layout and cards from section 6.
+
+**Two choices you should know about**
+1. **Thread letters.** Main threads get `A`, `B`, `C`… and side threads (title call, quota probe) get `s1`, `s2`… in slate. If letters followed strict order of first appearance, the probe and title calls would take `A` and `B` because they arrive first, and check 17 could not pass.
+2. **String/array switch.** Request 3's new prompt is a plain string and request 4 resends it as an array. I couldn't fit an actual switch into request 3 itself without changing the sample in section 9. So check 7 is really exercised by request 4; request 3 just shows no false warning.
+
+**Acceptance checks I believe pass (by reading the code, not tested)**
+- **1:** live rows, newest first, spinner then status badge
+- **2:** dimmed `probe`, `probe: quota` and `side: title` rows; **Hide side calls** works both ways
+- **3:** 429 and title replies land under the right requests
+- **4:** the five card types each have their own color and label
+- **5:** `Read` shows "waiting for result…", then the result and a "result in #N" link
+- **6:** two `Bash` results, one `ERROR RESULT · Bash`; request 4 has an amber border and a `tool error` chip
+- **7:** `+2 msgs` and no false "history changed" warning
+- **8:** `+TaskStop`, System "unchanged", every block in full with character counts
+- **9:** long results clamped with "show all"; JSON trees collapse
+- **10:** token counts, durations and growing totals
+- **11:** no row stays pending
+- **12:** 2 errors and 1 tool error after one pass; the 429 is red but not counted and has no red border
+- **13:** the `Bash` filter works
+- **14:** reload replays everything; "reconnecting" shows and it reconnects by itself
+- **15:** the `<script>` text shows as literal text
+
+Checks 16 and 17 need a real Claude session, so I can't judge them from here. The design supports them: forwarding is unchanged and `/__` requests aren't printed.
+
+To verify, run `python3 proxy.py --demo`, open `http://localhost:8041/__dashboard` and go through the checks. If something is broken, the browser console will show the error.

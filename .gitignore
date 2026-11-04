@@ -1,3 +1,5 @@
 .DS_Store
 traffic.log
 lab4/*.pdf
+lab4/builds/*/server.log
+lab4/builds/*-build.log

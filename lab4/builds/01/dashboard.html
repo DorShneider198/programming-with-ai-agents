@@ -1,0 +1,1160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent traffic</title>
+<style>
+:root{--muted:#6b7280;--border:#e5e7eb;--soft:#f8fafc;--ink:#111827}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);background:#fff;display:flex;flex-direction:column;overflow:hidden}
+pre,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+pre{margin:0;white-space:pre-wrap;word-break:break-word}
+button{font:inherit}
+/* top bar */
+#top{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--border);background:#fff}
+#conn{display:flex;align-items:center;gap:5px;font-weight:600;min-width:110px}
+.dot{width:9px;height:9px;border-radius:50%;background:#f59e0b;display:inline-block}
+.dot.live{background:#16a34a}
+#conn.re{color:#b45309}
+#totals{display:flex;flex-wrap:wrap;gap:4px 12px;color:#374151}
+#totals b{font-variant-numeric:tabular-nums}
+#totals .err b{color:#dc2626}
+#totals .terr b{color:#b45309}
+#totals .sub{color:var(--muted)}
+#controls{display:flex;gap:12px;align-items:center;margin-left:auto}
+#controls label{display:flex;gap:4px;align-items:center;cursor:pointer;white-space:nowrap}
+select{font:inherit;padding:1px 4px}
+/* panes */
+#main{flex:1;display:flex;min-height:0}
+#left{width:38%;min-width:340px;border-right:1px solid var(--border);position:relative;display:flex;flex-direction:column}
+#list{flex:1;overflow-y:auto;overflow-anchor:none}
+#right{flex:1;overflow-y:auto;padding:10px 18px 80px;min-width:0;overflow-anchor:none}
+#pill{position:absolute;top:8px;left:50%;transform:translateX(-50%);background:#2563eb;color:#fff;border:0;border-radius:999px;padding:3px 14px;cursor:pointer;display:none;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,.2);font-weight:600}
+.empty{color:var(--muted);padding:30px 10px;text-align:center}
+/* rows */
+.row{padding:5px 10px 5px 8px;border-bottom:1px solid #f1f5f9;border-left:4px solid transparent;cursor:pointer}
+.row:hover{background:var(--soft)}
+.row.sel{background:#eef2ff}
+.row.dim{opacity:.55}
+.row.dim.sel{opacity:.8}
+.row.lv1{border-left-color:#dc2626}
+.row.lv2{border-left-color:#f59e0b}
+.row.lv3{border-left:4px dashed #f59e0b}
+.l1,.l2{display:flex;gap:7px;align-items:center;white-space:nowrap;overflow:hidden;min-width:0}
+.l2{color:var(--muted);margin-top:2px;font-size:12px}
+.rid{font-weight:700;font-variant-numeric:tabular-nums;min-width:30px}
+.time{color:var(--muted);font-variant-numeric:tabular-nums}
+.chip{display:inline-block;border-radius:4px;padding:0 5px;font-size:11px;line-height:17px;font-weight:600;white-space:nowrap}
+.thr{color:#fff;min-width:20px;text-align:center}
+.thr.none{background:#e5e7eb;color:#6b7280}
+.kind{color:#475569;background:#f1f5f9}
+.badge{border-radius:4px;padding:0 6px;font-size:11px;line-height:17px;font-weight:700;color:#fff;white-space:nowrap}
+.b-ok{background:#16a34a}.b-bad{background:#dc2626}.b-run{background:#2563eb;animation:pulse 1s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.spin{width:12px;height:12px;border:2px solid #cbd5e1;border-top-color:#2563eb;border-radius:50%;animation:spin .8s linear infinite;display:inline-block;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+.model{color:var(--muted);overflow:hidden;text-overflow:ellipsis;min-width:0}
+.dur{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums;flex:none}
+.tchip{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;font-weight:600}
+.terrchip{background:#fef3c7;color:#92400e;border:1px solid #f59e0b}
+.warnchip{background:#fffbeb;color:#92400e;border:1px dashed #f59e0b}
+.newn{color:#1d4ed8;font-weight:600;flex:none}
+.snip{overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto;color:#374151}
+.errtxt{color:#dc2626}
+.otok{margin-left:auto;flex:none;font-variant-numeric:tabular-nums}
+/* detail */
+.sumbox{border:1px solid var(--border);border-radius:8px;padding:8px 12px;background:var(--soft);margin-bottom:10px}
+.sumbox .line{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;margin:2px 0}
+.sumbox .k{color:var(--muted)}
+.sumbox b{font-variant-numeric:tabular-nums}
+.warn{color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:5px;padding:3px 8px;margin:4px 0;display:inline-block}
+.errbox{color:#991b1b;background:#fef2f2;border:1px solid #fca5a5;border-left:4px solid #dc2626;border-radius:0 6px 6px 0;padding:6px 10px;margin:6px 0}
+.errbox b{color:#b91c1c}
+.cx-h{cursor:pointer;display:flex;gap:7px;align-items:center;user-select:none;min-width:0}
+.caret{color:var(--muted);width:10px;flex:none;font-size:11px}
+.panel{border:1px solid var(--border);border-radius:8px;margin:10px 0;overflow:hidden}
+.panel>.cx-h{padding:7px 10px;background:var(--soft);font-weight:600}
+.panel.open>.cx-h{border-bottom:1px solid var(--border)}
+.panel>.cx-b{padding:6px 12px 10px}
+.pbadge{font-weight:500;color:var(--muted);font-size:12px}
+.dbadge{font-weight:600;font-size:12px;border-radius:4px;padding:0 6px}
+.d-same{color:#475569;background:#f1f5f9}.d-chg{color:#92400e;background:#fef3c7}
+.d-add{color:#166534}.d-del{color:#991b1b}.d-mod{color:#92400e}
+/* messages and cards */
+.msg{margin:10px 0}
+.msg.r-assistant{margin-left:24px}
+.mhead{font-size:11px;color:var(--muted);font-weight:700;margin-bottom:2px;font-variant-numeric:tabular-nums}
+.mhead .role-user{color:#1d4ed8}.mhead .role-assistant{color:#15803d}.mhead .role-system{color:#4b5563}
+.card{border-left:4px solid #9ca3af;background:#fff;border-radius:0 6px 6px 0;padding:5px 10px 6px;margin:4px 0;min-width:0}
+.clabel{font-size:10.5px;font-weight:800;letter-spacing:.06em;display:flex;gap:8px;align-items:center;margin-bottom:2px;min-width:0}
+.clabel .nm{letter-spacing:0;font-size:11.5px}
+.clabel .meta{margin-left:auto;font-weight:500;letter-spacing:0;color:var(--muted)}
+.c-you{border-color:#2563eb;background:#eff6ff}.c-you>.clabel,.c-you>.cx-h .clabel{color:#1d4ed8}
+.c-inj{border-color:#9ca3af;background:#f9fafb}.c-inj .clabel{color:#6b7280}
+.c-sys{border-color:#6b7280;background:#f3f4f6}.c-sys .clabel{color:#4b5563}
+.c-add{border-color:#6b7280;background:#fff}.c-add .clabel{color:#4b5563}
+.c-model{border-color:#16a34a;background:#f0fdf4}.c-model>.clabel{color:#15803d}
+.c-think{border-color:#9333ea;background:#faf5ff}.c-think>.clabel{color:#7e22ce}.c-think pre,.c-think .ttxt{font-style:italic;font-family:inherit;font-size:13px}
+.c-call{border-color:#ea580c;background:#fff7ed}.c-call>.clabel{color:#c2410c}
+.c-res{border-color:#0d9488;background:#f0fdfa}.c-res>.clabel{color:#0f766e}
+.c-err{border-color:#dc2626;background:#fef2f2}.c-err>.clabel{color:#b91c1c}
+.c-unk{border-color:#9ca3af;background:#fff}.c-unk>.clabel{color:#6b7280}
+.card.hl{outline:1.5px solid #ea580c;outline-offset:1px}
+.c-model pre,.c-you pre{font-family:inherit;font-size:13px}
+.ic{font-size:12px;width:12px;text-align:center}
+.oneline{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;font-weight:400;letter-spacing:0;color:var(--muted)}
+.isum{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;background:rgba(255,255,255,.7);border:1px solid #fed7aa;border-radius:4px;padding:2px 6px;margin:2px 0;white-space:pre-wrap;word-break:break-all}
+.idesc{color:var(--muted);margin:2px 0}
+.attached{margin:6px 0 2px 12px}
+.waiting{color:#92400e;font-style:italic;margin:6px 0 2px 12px;display:flex;gap:6px;align-items:center}
+.stub{color:var(--muted);font-size:12px;padding:2px 8px;border-left:4px solid #99f6e4;margin:3px 0}
+.lnk{background:none;border:0;color:#2563eb;cursor:pointer;padding:0;text-decoration:underline;font-size:12px}
+.ltbar{display:flex;gap:12px;margin-top:3px}
+.loaded{font-weight:600;color:#0f766e;margin:2px 0}
+.group{border:1px dashed #cbd5e1;border-radius:6px;padding:3px 8px;margin:8px 0;color:var(--muted)}
+.group>.cx-b{color:var(--ink)}
+/* json tree */
+.jt{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px}
+.jrow{display:flex;gap:4px;align-items:flex-start;min-width:0}
+.jrow>.lt{flex:1;min-width:0}
+.jnode>.cx-b{padding-left:14px;border-left:1px dotted #d1d5db;margin-left:4px}
+.jk{color:#6b7280;white-space:nowrap}
+.js{color:#0f766e}.jn{color:#1d4ed8}.jb{color:#9333ea}.jnull{color:#9ca3af}
+.jsum{color:#9ca3af}
+.jhl{background:#fef08a;color:#713f12;border-radius:3px;padding:0 2px}
+.jtitle{font-size:11px;font-weight:700;color:var(--muted);margin:6px 0 2px}
+/* tools / headers / diff */
+.tline .tname{font-weight:700;flex:none}
+.tag{font-size:10.5px;border-radius:4px;padding:0 5px;background:#f1f5f9;color:#475569;flex:none}
+.tag.cache{background:#e0f2fe;color:#075985}
+.tag.new{background:#dcfce7;color:#166534}
+.tag.mod{background:#fef3c7;color:#92400e}
+.tline{padding:2px 0;border-bottom:1px solid #f3f4f6}
+table.hd{border-collapse:collapse;width:100%;font-size:12px;margin-bottom:8px}
+table.hd td{border-bottom:1px solid #f3f4f6;padding:2px 6px;vertical-align:top;word-break:break-all}
+table.hd td:first-child{color:var(--muted);white-space:nowrap;width:1%;word-break:normal}
+.diff{border:1px solid var(--border);border-radius:6px;padding:4px;margin:6px 0;max-height:500px;overflow:auto}
+.diff div{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word}
+.dl-add{background:#dcfce7}.dl-del{background:#fee2e2}.dl-skip{color:#9ca3af;font-style:italic}
+.sysblk{border-left:3px solid #d1d5db;padding-left:8px;margin:6px 0}
+</style>
+</head>
+<body>
+<div id="top">
+  <div id="conn" class="re"><span class="dot" id="dot"></span><span id="connText">connecting…</span></div>
+  <div id="totals"></div>
+  <div id="controls">
+    <select id="toolSel" title="Show only exchanges involving this tool"><option value="">all tools</option></select>
+    <label><input type="checkbox" id="errOnly"> Errors only</label>
+    <label><input type="checkbox" id="hideSide"> Hide side calls</label>
+    <label><input type="checkbox" id="follow" checked> Follow newest</label>
+  </div>
+</div>
+<div id="main">
+  <div id="left">
+    <button id="pill" type="button"></button>
+    <div id="list"></div>
+  </div>
+  <div id="right"></div>
+</div>
+<script>
+'use strict';
+// All data goes into the page through textContent / createElement. Never innerHTML.
+
+// ------------------------------------------------------------------ helpers
+const $ = (id) => document.getElementById(id);
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  if (props) for (const k in props) {
+    const v = props[k];
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, String(v));
+  }
+  add(el, kids);
+  return el;
+}
+function add(el, kids) {
+  for (const c of kids) {
+    if (c == null || c === false) continue;
+    if (Array.isArray(c)) add(el, c);
+    else if (c instanceof Node) el.appendChild(c);
+    else el.appendChild(document.createTextNode(String(c)));
+  }
+}
+const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const pad2 = (n) => String(n).padStart(2, '0');
+function fmtTime(t) { const d = new Date(t); return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds()); }
+function fmtDur(ms) { if (ms == null || !isFinite(ms)) return '–'; if (ms < 1000) return Math.round(ms) + 'ms'; if (ms < 60000) return (ms / 1000).toFixed(1) + 's'; return Math.floor(ms / 60000) + 'm' + pad2(Math.round(ms % 60000 / 1000)) + 's'; }
+function fmtK(n) { n = n || 0; if (n < 1000) return String(n); if (n < 1e6) return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k'; return (n / 1e6).toFixed(2) + 'M'; }
+const fmtN = (n) => (n || 0).toLocaleString('en-US');
+function sortKeys(v) {
+  if (Array.isArray(v)) return v.map(sortKeys);
+  if (isObj(v)) { const o = {}; for (const k of Object.keys(v).sort()) { if (k === 'cache_control') continue; o[k] = sortKeys(v[k]); } return o; }
+  return v;
+}
+const stable = (v) => v === undefined ? '\u0000undef' : JSON.stringify(sortKeys(v));
+function normMsg(m) {
+  if (!isObj(m)) return stable(m);
+  const c = typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : m.content;
+  return stable(Object.assign({}, m, { content: c }));
+}
+function getHeader(pairs, name) {
+  name = name.toLowerCase();
+  for (const p of pairs || []) if (String(p[0]).toLowerCase() === name) return p[1];
+  return null;
+}
+function blocksOf(content) {
+  if (typeof content === 'string') return [{ type: 'text', text: content }];
+  if (Array.isArray(content)) return content;
+  if (content == null) return [];
+  return [content];
+}
+function sysBlocks(b) {
+  const s = b && b.system;
+  if (typeof s === 'string') return [{ type: 'text', text: s }];
+  if (Array.isArray(s)) return s;
+  return [];
+}
+const blockText = (x) => typeof x === 'string' ? x : (isObj(x) && typeof x.text === 'string') ? x.text : JSON.stringify(x);
+const lineCount = (s) => { let n = 1; for (let i = s.indexOf('\n'); i >= 0; i = s.indexOf('\n', i + 1)) n++; return n; };
+function copyText(s, btn) {
+  const done = () => { btn.textContent = 'copied'; setTimeout(() => { btn.textContent = 'copy'; }, 1200); };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(s).then(done, () => fallbackCopy(s, done));
+  else fallbackCopy(s, done);
+}
+function fallbackCopy(s, done) {
+  const ta = h('textarea', { style: 'position:fixed;left:-9999px;top:0' }); ta.value = s;
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); done(); } catch (e) { /* ignore */ }
+  ta.remove();
+}
+function letters(n) { let s = ''; n++; while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); } return s; }
+
+// ------------------------------------------------------------------ state
+const PALETTE = ['#2563eb', '#0d9488', '#d97706', '#db2777']; // blue, teal, amber, pink
+const SLATE = '#64748b';
+const PARAMS = ['model', 'max_tokens', 'thinking', 'output_config', 'context_management'];
+const UI = { tool: '', errorsOnly: false, hideSide: false, follow: true };
+let S;            // everything rebuilt on `reset`
+let selected = null;   // user's selection (exchange id), kept across reconnects
+let newCount = 0;
+function fresh() {
+  S = { ex: new Map(), threads: new Map(), mainSeq: 0, sideSeq: 0, tools: new Map(), toolNames: new Set(), newestMain: null };
+}
+fresh();
+function tent(id) {
+  let e = S.tools.get(id);
+  if (!e) { e = { name: null, input: undefined, callExchangeId: null, resultExchangeId: null, resultBlock: null }; S.tools.set(id, e); }
+  return e;
+}
+function addToolName(n) { if (n && !S.toolNames.has(n)) { S.toolNames.add(n); dirty.filterOpts = true; } }
+
+// ------------------------------------------------------------------ classify / threads
+function classify(req, b) {
+  if (req.method !== 'POST' || !String(req.path || '').startsWith('/v1/messages')) return { kind: 'probe', label: 'probe' };
+  if (b && b.max_tokens === 1) return { kind: 'probe', label: 'probe: quota' };
+  if (!b || !Array.isArray(b.tools) || b.tools.length === 0) {
+    let name = null;
+    const props = b && b.output_config && b.output_config.format && b.output_config.format.schema && b.output_config.format.schema.properties;
+    if (isObj(props)) name = Object.keys(props)[0] || null;
+    return { kind: 'side', label: name ? 'side: ' + name : 'side' };
+  }
+  return { kind: 'main', label: '' };
+}
+function threadFor(ex) {
+  const sid = getHeader(ex.req.headers, 'x-claude-code-session-id') || '';
+  const sb = sysBlocks(ex.b);
+  const sysLast = sb.length ? blockText(sb[sb.length - 1]) : '';
+  let fu = '';
+  if (ex.msgs) { const m = ex.msgs.find((x) => isObj(x) && x.role === 'user'); if (m) fu = normMsg(m); }
+  else if (!ex.b && ex.req.body) fu = String(ex.req.body);
+  const key = sid + '\u0001' + sysLast.slice(0, 300) + '\u0001' + fu.slice(0, 300);
+  let t = S.threads.get(key);
+  if (!t) {
+    // Main threads are lettered A, B, C… in order of first appearance; side
+    // threads (title calls, probes with a body) get s1, s2… in slate, so the
+    // real session is always thread A even though its side calls come first.
+    if (ex.kind === 'main') { t = { key, name: letters(S.mainSeq), color: PALETTE[S.mainSeq % PALETTE.length], main: true }; S.mainSeq++; }
+    else { S.sideSeq++; t = { key, name: 's' + S.sideSeq, color: SLATE, main: false }; }
+    t.lastReq = null;
+    S.threads.set(key, t);
+  } else if (ex.kind === 'main' && !t.main) {
+    t.main = true; t.name = letters(S.mainSeq); t.color = PALETTE[S.mainSeq % PALETTE.length]; S.mainSeq++;
+    for (const o of S.ex.values()) if (o.thread === t) dirty.rows.add(o.id);
+  }
+  return t;
+}
+
+// ------------------------------------------------------------------ requests
+function onRequest(ev) {
+  if (S.ex.has(ev.id)) return;
+  const b = isObj(ev.body_json) ? ev.body_json : null;
+  const ex = {
+    id: ev.id, req: ev, b, start: null, end: null, text: '', rp: newReply(), firstChunkT: null,
+    msgs: b && Array.isArray(b.messages) ? b.messages : null, norm: null, prev: null,
+    newStart: 0, collapsed: 0, histChanged: false, newResultIds: [], toolErrIds: [],
+    level: 0, errReason: null, thread: null, row: null,
+    sysChanged: null, toolsDiff: null, paramChanged: null, topChanged: new Set(),
+  };
+  Object.assign(ex, classify(ev, b));
+  S.ex.set(ex.id, ex);
+  const hasBody = ev.body_json != null || (ev.body != null && ev.body !== '');
+  if (!(ex.kind === 'probe' && !hasBody)) ex.thread = threadFor(ex);
+  const resolved = [];
+  if (ex.msgs) {
+    ex.norm = ex.msgs.map(normMsg);
+    const prev = ex.thread && ex.thread.lastReq != null ? S.ex.get(ex.thread.lastReq) : null;
+    if (prev && prev.norm) {
+      ex.prev = prev.id;
+      let L = 0; const n = Math.min(prev.norm.length, ex.norm.length);
+      while (L < n && prev.norm[L] === ex.norm[L]) L++;
+      ex.newStart = L; ex.collapsed = L; ex.histChanged = L < prev.norm.length;
+      computeDiffs(ex, prev);
+    } else {
+      let i = -1;
+      for (let k = ex.msgs.length - 1; k >= 0; k--) if (isObj(ex.msgs[k]) && ex.msgs[k].role === 'user') { i = k; break; }
+      if (i < 0) i = 0;
+      if (i > 0 && isObj(ex.msgs[i - 1]) && ex.msgs[i - 1].role === 'system') i--;
+      ex.newStart = i; ex.collapsed = 0;
+    }
+    if (ex.thread) ex.thread.lastReq = ex.id;
+    indexRequest(ex, resolved);
+  }
+  if (ex.kind === 'main' && (S.newestMain == null || ex.id > S.newestMain)) S.newestMain = ex.id;
+  computeLevel(ex);
+  insertRow(ex);
+  // A waiting tool call on screen just got its result: update it in place.
+  if (resolved.some((id) => displayed.has(id))) dirty.detail = 'all';
+  if (ex.kind === 'main' && UI.follow && $('list').scrollTop <= 4) select(ex.id, false);
+  dirty.totals = true;
+  schedule();
+}
+function indexRequest(ex, resolved) {
+  ex.msgs.forEach((m, mi) => {
+    if (!isObj(m) || !Array.isArray(m.content)) return;
+    for (const b of m.content) {
+      if (!isObj(b)) continue;
+      if (b.type === 'tool_use' && b.id) {
+        const e = tent(b.id);
+        if (!e.name) e.name = b.name;
+        if (e.input === undefined) e.input = b.input;
+        addToolName(b.name);
+      } else if (b.type === 'tool_result' && b.tool_use_id) {
+        const e = tent(b.tool_use_id);
+        if (mi >= ex.newStart) ex.newResultIds.push(b.tool_use_id);
+        if (e.resultExchangeId == null) {
+          e.resultExchangeId = ex.id; e.resultBlock = b; resolved.push(b.tool_use_id);
+          if (b.is_error) ex.toolErrIds.push(b.tool_use_id);
+        }
+      }
+    }
+  });
+}
+function toolKey(t) { return isObj(t) ? String(t.name || t.type || '?') : String(t); }
+function computeDiffs(ex, prev) {
+  const a = prev.b || {}, b = ex.b || {};
+  ex.sysChanged = stable(sysBlocks(a)) !== stable(sysBlocks(b));
+  const ta = new Map((Array.isArray(a.tools) ? a.tools : []).map((t) => [toolKey(t), stable(t)]));
+  const tb = new Map((Array.isArray(b.tools) ? b.tools : []).map((t) => [toolKey(t), stable(t)]));
+  const added = [], removed = [], changed = [];
+  for (const [k, v] of tb) { if (!ta.has(k)) added.push(k); else if (ta.get(k) !== v) changed.push(k); }
+  for (const k of ta.keys()) if (!tb.has(k)) removed.push(k);
+  ex.toolsDiff = { added, removed, changed };
+  ex.paramChanged = PARAMS.filter((k) => stable(a[k]) !== stable(b[k]));
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const k of keys) if (!['messages', 'system', 'tools'].includes(k) && stable(a[k]) !== stable(b[k])) ex.topChanged.add(k);
+}
+
+// ------------------------------------------------------------------ replies
+function newReply() {
+  return { sse: null, buf: '', evName: null, data: [], msgId: null, model: null, usage: {}, blocks: [],
+           stop: null, complete: false, error: null, requestId: null, json: null, plain: false, warnings: [] };
+}
+function feed(ex, text) {
+  ex.text += text;
+  const r = ex.rp;
+  if (r.sse === null) {
+    const s = ex.text.replace(/^\s+/, '');
+    if (!s) return;
+    r.sse = /^(event|data|id|retry)\s*:/.test(s) || s.startsWith(':');
+    if (!r.sse) return;
+    text = ex.text;  // the whole buffer so far
+  }
+  if (!r.sse) return;
+  r.buf += text;
+  const lines = r.buf.split('\n');
+  r.buf = lines.pop();  // a chunk may end in the middle of a line
+  for (const l of lines) sseLine(ex, l);
+}
+function sseLine(ex, line) {
+  const r = ex.rp;
+  if (line.endsWith('\r')) line = line.slice(0, -1);
+  if (line.trim() === '') { dispatchSSE(ex); return; }
+  if (line.startsWith(':')) return;
+  const c = line.indexOf(':');
+  const field = c < 0 ? line : line.slice(0, c);
+  let value = c < 0 ? '' : line.slice(c + 1);
+  if (value.startsWith(' ')) value = value.slice(1);
+  if (field === 'event') r.evName = value.trim();
+  else if (field === 'data') r.data.push(value);
+}
+function dispatchSSE(ex) {
+  const r = ex.rp;
+  const name = r.evName; r.evName = null;
+  if (!r.data.length) return;
+  const raw = r.data.join('\n').trim(); r.data = [];
+  let ev;
+  try { ev = JSON.parse(raw); } catch (e) { r.warnings.push('unparseable SSE data: ' + raw.slice(0, 120)); return; }
+  if (isObj(ev) && !ev.type && name) ev.type = name;
+  try { applyEvent(ex, ev, name); } catch (e) { r.warnings.push('could not apply event ' + (ev && ev.type) + ': ' + e.message); }
+}
+function applyEvent(ex, ev, name) {
+  const r = ex.rp;
+  const type = (isObj(ev) && ev.type) || name;
+  switch (type) {
+    case 'message_start': {
+      const m = ev.message || {};
+      r.msgId = m.id || null; r.model = m.model || null;
+      r.usage = Object.assign({}, m.usage || {});
+      if (Array.isArray(m.content) && m.content.length) r.blocks = m.content.map((b) => Object.assign({}, b));
+      break;
+    }
+    case 'content_block_start': {
+      const b = Object.assign({}, ev.content_block || { type: 'unknown' });
+      b._open = true; b._raw = '';
+      r.blocks[ev.index] = b;
+      if ((b.type === 'tool_use' || b.type === 'server_tool_use') && b.id) {
+        const e = tent(b.id); e.name = b.name; e.callExchangeId = ex.id; addToolName(b.name);
+      }
+      break;
+    }
+    case 'content_block_delta': {
+      let b = r.blocks[ev.index];
+      if (!b) { b = r.blocks[ev.index] = { type: 'unknown', _open: true, _raw: '' }; }
+      const d = ev.delta || {};
+      if (d.type === 'text_delta') b.text = (b.text || '') + (d.text || '');
+      else if (d.type === 'thinking_delta') b.thinking = (b.thinking || '') + (d.thinking || '');
+      else if (d.type === 'signature_delta') { b._signed = true; b.signature = (b.signature || '') + (d.signature || ''); }
+      else if (d.type === 'input_json_delta') b._raw += d.partial_json || '';
+      else { (b._otherDeltas = b._otherDeltas || []).push(d); }
+      break;
+    }
+    case 'content_block_stop': {
+      const b = r.blocks[ev.index];
+      if (!b) break;
+      b._open = false;
+      if (b.type === 'tool_use' || b.type === 'server_tool_use') {
+        if (b._raw.trim() !== '') {
+          try { b.input = JSON.parse(b._raw); }
+          catch (e) { b._bad = true; r.warnings.push('tool input for ' + b.name + ' is not valid JSON; showing the raw text'); }
+        } else if (b.input === undefined) b.input = {};
+        if (b.id) { const e = tent(b.id); e.input = b.input; }
+      }
+      break;
+    }
+    case 'message_delta':
+      if (ev.delta && ev.delta.stop_reason !== undefined) r.stop = ev.delta.stop_reason;
+      if (isObj(ev.usage)) Object.assign(r.usage, ev.usage);
+      break;
+    case 'message_stop': r.complete = true; break;
+    case 'error': r.error = (ev && ev.error) || ev; r.requestId = ev && ev.request_id; break;
+    case 'ping': break;
+    default: break;
+  }
+}
+function finishNonSSE(ex) {
+  const r = ex.rp;
+  const t = ex.text.trim();
+  if (!t) return;
+  let j;
+  try { j = JSON.parse(t); } catch (e) { r.plain = true; return; }
+  if (isObj(j) && j.type === 'error') { r.error = j.error || j; r.requestId = j.request_id || null; }
+  else if (isObj(j) && j.type === 'message') {
+    r.blocks = blocksOf(j.content).map((b) => Object.assign({}, b));
+    r.usage = Object.assign({}, j.usage || {}); r.stop = j.stop_reason || null; r.model = j.model || null;
+    r.msgId = j.id || null; r.complete = true;
+    for (const b of r.blocks) if (isObj(b) && b.type === 'tool_use' && b.id) {
+      const e = tent(b.id); e.name = b.name; e.input = b.input; e.callExchangeId = ex.id; addToolName(b.name);
+    }
+  } else r.json = j;
+}
+function onStart(ev) { const ex = S.ex.get(ev.id); if (!ex) return; ex.start = ev; touch(ex); }
+function onChunk(ev) {
+  const ex = S.ex.get(ev.id); if (!ex) return;
+  if (ex.firstChunkT == null) ex.firstChunkT = ev.t;
+  feed(ex, ev.text || '');
+  touch(ex);
+}
+function onEnd(ev) {
+  const ex = S.ex.get(ev.id); if (!ex) return;
+  ex.end = ev;
+  const r = ex.rp;
+  if (r.sse) { if (r.buf) { sseLine(ex, r.buf); r.buf = ''; } dispatchSSE(ex); }
+  else finishNonSSE(ex);
+  touch(ex);
+}
+function touch(ex) {
+  computeLevel(ex);
+  dirty.rows.add(ex.id);
+  dirty.totals = true;
+  if (ex.id === curId() && dirty.detail !== 'all') dirty.detail = 'live';
+  schedule();
+}
+
+// ------------------------------------------------------------------ levels (6.5)
+function computeLevel(ex) {
+  const st = ex.start ? ex.start.status : null;
+  const r = ex.rp;
+  let err = null;
+  if (ex.kind !== 'probe') {   // probes are never counted as errors
+    if (st != null && st >= 400) err = 'HTTP ' + st + (ex.start.reason ? ' ' + ex.start.reason : '');
+    else if (ex.end && ex.end.ok === false) err = ex.end.error || 'exchange failed';
+    else if (r.error) err = 'stream error: ' + ((r.error && (r.error.type || r.error.message)) || 'error');
+    else if (ex.end && r.sse && !r.complete) err = 'stream ended without message_stop';
+  }
+  ex.errReason = err;
+  ex.level = err ? 1 : ex.toolErrIds.length ? 2 : r.stop === 'max_tokens' ? 3 : 0;
+}
+function involves(ex, name) {
+  for (const b of ex.rp.blocks) if (b && (b.type === 'tool_use' || b.type === 'server_tool_use') && b.name === name) return true;
+  for (const id of ex.newResultIds) { const e = S.tools.get(id); if (e && e.name === name) return true; }
+  return false;
+}
+function visible(ex) {
+  if (UI.hideSide && ex.kind !== 'main') return false;
+  if (UI.errorsOnly && !ex.level) return false;
+  if (UI.tool && !involves(ex, UI.tool)) return false;
+  return true;
+}
+
+// ------------------------------------------------------------------ rows
+function threadChip(ex) {
+  if (!ex.thread) return h('span', { class: 'chip thr none', title: 'no thread' }, '–');
+  return h('span', { class: 'chip thr', style: 'background:' + ex.thread.color, title: 'thread ' + ex.thread.name }, ex.thread.name);
+}
+function statusBadge(ex) {
+  if (!ex.start && !ex.end) return h('span', { class: 'spin', title: 'pending' });
+  const st = ex.start ? ex.start.status : null;
+  const bad = (st != null && st >= 400) || (ex.end && ex.end.ok === false) || ex.level === 1;
+  let txt = st != null ? String(st) : '!';
+  if (st != null && st < 400 && bad) txt += ' !';
+  const cls = !ex.end ? 'badge b-run' : bad ? 'badge b-bad' : 'badge b-ok';
+  return h('span', { class: cls, title: ex.start ? (st + ' ' + (ex.start.reason || '')) : 'failed' }, txt);
+}
+function replyModel(ex) { return ex.rp.model || (ex.b && ex.b.model) || ''; }
+function replyText(ex) {
+  let s = '';
+  for (const b of ex.rp.blocks) if (b && b.type === 'text' && b.text) s += b.text + ' ';
+  return s.replace(/\s+/g, ' ').trim();
+}
+function toolChips(ex) {
+  const counts = new Map();
+  for (const b of ex.rp.blocks) if (b && (b.type === 'tool_use' || b.type === 'server_tool_use')) counts.set(b.name, (counts.get(b.name) || 0) + 1);
+  return [...counts].map(([n, c]) => h('span', { class: 'chip tchip' }, c > 1 ? n + ' ×' + c : n));
+}
+function insertRow(ex) {
+  const list = $('list');
+  const row = h('div', { class: 'row', onclick: () => { select(ex.id, true); } });
+  ex.row = row;
+  renderRow(ex);
+  const atTop = list.scrollTop <= 4;
+  list.insertBefore(row, list.firstChild);
+  if (!atTop && row.style.display !== 'none') {
+    list.scrollTop += row.offsetHeight;   // keep the user's place
+    newCount++; updatePill();
+  }
+  const empty = list.querySelector('.empty'); if (empty) empty.remove();
+}
+function renderRow(ex) {
+  const row = ex.row; if (!row) return;
+  let cls = 'row';
+  if (ex.kind !== 'main') cls += ' dim';
+  if (ex.level === 1) cls += ' lv1'; else if (ex.level === 2) cls += ' lv2'; else if (ex.level === 3) cls += ' lv3';
+  if (ex.id === curId()) cls += ' sel';
+  row.className = cls;
+  const dur = ex.end ? fmtDur(ex.end.t - ex.req.t) : '…';
+  const l1 = h('div', { class: 'l1' },
+    h('span', { class: 'rid' }, '#' + ex.id),
+    h('span', { class: 'time' }, fmtTime(ex.req.t)),
+    threadChip(ex),
+    ex.label ? h('span', { class: 'chip kind' }, ex.label) : null,
+    statusBadge(ex),
+    h('span', { class: 'model' }, replyModel(ex)),
+    h('span', { class: 'dur' }, dur));
+  const parts = [];
+  if (ex.msgs) parts.push(h('span', { class: 'newn' }, '+' + (ex.msgs.length - ex.newStart) + ' msgs'));
+  else if (ex.req.method !== 'POST' || !ex.b) parts.push(h('span', null, ex.req.method + ' ' + ex.req.path));
+  const r = ex.rp;
+  const chips = toolChips(ex);
+  const txt = replyText(ex);
+  const errMsg = r.error ? ((r.error.type || 'error') + ': ' + (r.error.message || '')) : (ex.level === 1 ? ex.errReason : null);
+  if (chips.length || txt || errMsg) parts.push(h('span', null, '→'));
+  parts.push(...chips);
+  if (errMsg) parts.push(h('span', { class: 'snip errtxt' }, errMsg));
+  else if (txt) parts.push(h('span', { class: 'snip' }, txt.length > 70 ? txt.slice(0, 70) + '…' : txt));
+  if (ex.level === 2) parts.push(h('span', { class: 'chip terrchip' }, 'tool error'));
+  if (ex.level === 3) parts.push(h('span', { class: 'chip warnchip' }, 'max_tokens'));
+  if (r.usage && r.usage.output_tokens != null) parts.push(h('span', { class: 'otok' }, fmtK(r.usage.output_tokens) + ' out'));
+  row.replaceChildren(l1, h('div', { class: 'l2' }, parts));
+  row.style.display = visible(ex) ? '' : 'none';
+}
+function applyFilters() { for (const ex of S.ex.values()) renderRow(ex); dirty.detail = 'all'; schedule(); }
+function updatePill() {
+  const p = $('pill');
+  if (newCount > 0) { p.textContent = '↑ ' + newCount + ' new'; p.style.display = 'block'; }
+  else p.style.display = 'none';
+}
+function select(id, byUser) {
+  const before = curId();
+  selected = id;
+  if (byUser && UI.follow) { UI.follow = false; $('follow').checked = false; }
+  const after = curId();
+  if (before !== after) {
+    const a = S.ex.get(before), b = S.ex.get(after);
+    if (a) dirty.rows.add(a.id);
+    if (b) dirty.rows.add(b.id);
+    dirty.detail = 'all';
+    schedule();
+  }
+}
+function curId() {
+  if (selected != null && S.ex.has(selected)) return selected;
+  return S.newestMain;
+}
+
+// ------------------------------------------------------------------ totals
+function renderTotals() {
+  let req = 0, errs = 0, terrs = 0, fresh = 0, cw = 0, cr = 0, out = 0, calls = 0;
+  for (const ex of S.ex.values()) {
+    req++;
+    if (ex.level === 1) errs++;
+    terrs += ex.toolErrIds.length;
+    const u = ex.rp.usage || {};
+    fresh += u.input_tokens || 0; cw += u.cache_creation_input_tokens || 0; cr += u.cache_read_input_tokens || 0; out += u.output_tokens || 0;
+    for (const b of ex.rp.blocks) if (b && (b.type === 'tool_use' || b.type === 'server_tool_use')) calls++;
+  }
+  const item = (cls, n, label, title) => h('span', { class: cls, title: title || '' }, h('b', null, n), ' ' + label);
+  $('totals').replaceChildren(
+    item('', fmtN(req), 'requests'),
+    item('err', fmtN(errs), errs === 1 ? 'error' : 'errors', 'exchanges that failed (status ≥ 400, broken stream, SSE error); probes not counted'),
+    item('terr', fmtN(terrs), terrs === 1 ? 'tool error' : 'tool errors', 'tool results with is_error (each tool_use_id once)'),
+    h('span', { title: 'input tokens: fresh / cache write / cache read' }, 'in ', h('b', null, fmtK(fresh)), h('span', { class: 'sub' }, ' fresh / '),
+      h('b', null, fmtK(cw)), h('span', { class: 'sub' }, ' write / '), h('b', null, fmtK(cr)), h('span', { class: 'sub' }, ' read')),
+    item('', fmtK(out), 'out'),
+    item('', fmtN(calls), calls === 1 ? 'tool call' : 'tool calls'));
+}
+function renderToolOptions() {
+  const sel = $('toolSel'); const cur = UI.tool;
+  const names = [...S.toolNames].sort((a, b) => a.localeCompare(b));
+  if (cur && !S.toolNames.has(cur)) names.unshift(cur);
+  sel.replaceChildren(h('option', { value: '' }, 'all tools'), ...names.map((n) => h('option', { value: n }, n)));
+  sel.value = cur;
+}
+
+// ------------------------------------------------------------------ render loop
+const dirty = { rows: new Set(), detail: null, totals: false, filterOpts: false };
+let flushQueued = false, lastDetail = 0, detailTimer = null;
+function schedule() { if (!flushQueued) { flushQueued = true; requestAnimationFrame(flush); } }
+function flush() {
+  flushQueued = false;
+  for (const id of dirty.rows) { const ex = S.ex.get(id); if (ex) renderRow(ex); }
+  dirty.rows.clear();
+  if (dirty.filterOpts) { dirty.filterOpts = false; renderToolOptions(); }
+  if (dirty.totals) { dirty.totals = false; renderTotals(); }
+  if (curId() !== dShown) dirty.detail = 'all';
+  if (dirty.detail) {
+    const now = performance.now();
+    if (dirty.detail === 'live' && now - lastDetail < 150) {
+      if (!detailTimer) detailTimer = setTimeout(() => { detailTimer = null; schedule(); }, 160);
+    } else {
+      const part = dirty.detail; dirty.detail = null; lastDetail = now;
+      renderDetail(part);
+    }
+  }
+}
+
+// ------------------------------------------------------------------ detail building blocks
+let dState = new Map();     // open/closed state of collapsibles, by key, for the shown exchange
+let dShown = undefined;     // exchange id shown in the detail pane
+let dRefs = {};
+let displayed = new Set();  // tool_use ids shown in the detail pane
+let ctxFilter = '';
+
+function cx(key, defOpen, headKids, build, cls) {
+  const wrap = h('div', { class: 'cx' + (cls ? ' ' + cls : '') });
+  const caret = h('span', { class: 'caret' });
+  const head = h('div', { class: 'cx-h' }, caret, headKids);
+  const body = h('div', { class: 'cx-b' });
+  let built = false, open = false;
+  function set(o, user) {
+    open = o;
+    if (user) dState.set(key, o);
+    caret.textContent = o ? '▾' : '▸';
+    body.style.display = o ? '' : 'none';
+    wrap.classList.toggle('open', o);
+    if (o && !built) { built = true; build(body); }
+  }
+  head.addEventListener('click', (e) => { if (e.target.closest('button,a,select,input')) return; e.stopPropagation(); set(!open, true); });
+  wrap.append(head, body);
+  set(dState.has(key) ? dState.get(key) : defOpen, false);
+  return wrap;
+}
+function panel(key, title, badge, defOpen, build) {
+  return cx('sec:' + key, defOpen, [h('span', null, title), badge || null], build, 'panel');
+}
+function copyBtn(s) { const b = h('button', { class: 'lnk', type: 'button' }, 'copy'); b.addEventListener('click', (e) => { e.stopPropagation(); copyText(s, b); }); return b; }
+function clampStr(s) {
+  let out = s; let idx = -1;
+  for (let i = 0; i < 15; i++) { idx = out.indexOf('\n', idx + 1); if (idx < 0) break; }
+  if (idx >= 0) out = out.slice(0, idx);
+  if (out.length > 1200) out = out.slice(0, 1200);
+  return out + ' …';
+}
+// Long text: >15 lines or >1200 chars is clamped, with "show all" and copy.
+function longText(s, key, cls, opts) {
+  s = String(s); opts = opts || {};
+  const pre = h('pre', { class: cls || '' });
+  const wrap = h('div', { class: 'lt' }, pre);
+  const nl = lineCount(s);
+  const long = nl > 15 || s.length > 1200;
+  if (!long && !opts.noClampCopy) { pre.textContent = s; return wrap; }
+  if (!long) { pre.textContent = s; wrap.append(h('div', { class: 'ltbar' }, copyBtn(s))); return wrap; }
+  const k = key + '#all';
+  let exp = dState.get(k) || false;
+  const btn = h('button', { class: 'lnk', type: 'button' });
+  const upd = () => { pre.textContent = exp ? s : clampStr(s); btn.textContent = exp ? 'show less' : 'show all (' + fmtN(nl) + ' lines, ' + fmtN(s.length) + ' chars)'; };
+  btn.addEventListener('click', (e) => { e.stopPropagation(); exp = !exp; dState.set(k, exp); upd(); });
+  upd();
+  wrap.append(h('div', { class: 'ltbar' }, btn, copyBtn(s)));
+  return wrap;
+}
+// JSON tree: collapsible, open to depth 2, counts shown, long strings clamped.
+function jt(v, key, opts) { return h('div', { class: 'jt' }, jnode(null, v, key, 0, opts || {})); }
+function jnode(k, v, key, depth, opts) {
+  const keyEl = k != null ? h('span', { class: 'jk' + (opts.hl && depth === 1 && opts.hl.has(String(k)) ? ' jhl' : '') }, (typeof k === 'number' ? k : JSON.stringify(String(k))) + ':') : null;
+  if (v !== null && typeof v === 'object') {
+    const arr = Array.isArray(v);
+    const keys = arr ? null : Object.keys(v);
+    const n = arr ? v.length : keys.length;
+    if (n === 0) return h('div', { class: 'jrow' }, keyEl, h('span', { class: 'jsum' }, arr ? '[]' : '{}'));
+    const sum = h('span', { class: 'jsum' }, arr ? '[' + n + (n === 1 ? ' item]' : ' items]') : '{' + n + (n === 1 ? ' key}' : ' keys}'));
+    return cx(key, depth < 2, [keyEl, sum], (body) => {
+      if (arr) v.forEach((x, i) => body.append(jnode(i, x, key + '/' + i, depth + 1, opts)));
+      else for (const kk of keys) body.append(jnode(kk, v[kk], key + '/' + kk, depth + 1, opts));
+    }, 'jnode');
+  }
+  let val;
+  if (typeof v === 'string') {
+    if (v.length > 120 || v.includes('\n')) val = longText(v, key, 'js');
+    else val = h('span', { class: 'js' }, JSON.stringify(v));
+  } else if (typeof v === 'number') val = h('span', { class: 'jn' }, String(v));
+  else if (typeof v === 'boolean') val = h('span', { class: 'jb' }, String(v));
+  else if (v === null) val = h('span', { class: 'jnull' }, 'null');
+  else val = h('span', { class: 'jnull' }, String(v));
+  return h('div', { class: 'jrow' }, keyEl, val);
+}
+
+// ------------------------------------------------------------------ cards (6.4)
+function card(cls, icon, label, name, meta, kids, hl) {
+  return h('div', { class: 'card ' + cls + (hl ? ' hl' : '') },
+    h('div', { class: 'clabel' }, h('span', { class: 'ic' }, icon), h('span', null, label), name ? h('span', { class: 'nm' }, name) : null, meta ? h('span', { class: 'meta' }, meta) : null),
+    kids);
+}
+// A card that is collapsed to one line by default.
+function foldCard(cls, icon, label, preview, meta, key, build) {
+  return h('div', { class: 'card ' + cls },
+    cx(key, false, [h('span', { class: 'clabel', style: 'margin:0;flex:none' }, h('span', { class: 'ic' }, icon), label),
+      h('span', { class: 'oneline' }, preview), meta ? h('span', { class: 'pbadge', style: 'flex:none' }, meta) : null], build));
+}
+function inputSummary(name, input) {
+  if (!isObj(input)) return null;
+  const pick = (k) => typeof input[k] === 'string' ? input[k] : null;
+  let s = null;
+  if (name === 'Bash') s = pick('command');
+  else if (name === 'Read' || name === 'Edit' || name === 'Write' || name === 'MultiEdit') s = pick('file_path');
+  else if (name === 'NotebookEdit') s = pick('notebook_path');
+  else if (name === 'Grep' || name === 'Glob') s = pick('pattern');
+  if (s == null) for (const k of Object.keys(input)) if (typeof input[k] === 'string' && k !== 'description') { s = input[k]; break; }
+  return s;
+}
+function resultContentLen(c) {
+  if (typeof c === 'string') return c.length;
+  if (Array.isArray(c)) return c.reduce((n, p) => n + (isObj(p) && typeof p.text === 'string' ? p.text.length : 0), 0);
+  return 0;
+}
+function resultCard(b, name, key) {
+  name = name || '?';
+  const err = !!b.is_error;
+  const c = b.content;
+  const kids = [];
+  if (typeof c === 'string') kids.push(longText(c, key, 'mono', { noClampCopy: true }));
+  else if (Array.isArray(c)) c.forEach((p, i) => {
+    if (isObj(p) && p.type === 'text') kids.push(longText(p.text || '', key + '/' + i, 'mono', { noClampCopy: true }));
+    else if (isObj(p) && p.type === 'tool_reference') kids.push(h('div', { class: 'loaded' }, '⇪ LOADED TOOL: ' + p.tool_name));
+    else if (isObj(p) && p.type === 'image') kids.push(h('div', { class: 'loaded' }, '[image' + (p.source && p.source.media_type ? ': ' + p.source.media_type : '') + ']'));
+    else kids.push(h('div', null, h('div', { class: 'jtitle' }, String(isObj(p) ? p.type : typeof p)), jt(p, key + '/' + i)));
+  });
+  else if (c == null) kids.push(h('div', { class: 'idesc' }, '(empty result)'));
+  else kids.push(jt(c, key + '/c'));
+  const len = resultContentLen(c);
+  const meta = (Array.isArray(c) ? c.length + (c.length === 1 ? ' part · ' : ' parts · ') : '') + fmtN(len) + ' chars' + (typeof c === 'string' ? ' · ' + fmtN(lineCount(c)) + ' lines' : '');
+  return card(err ? 'c-err' : 'c-res', err ? '✖' : '↳', err ? 'ERROR RESULT · ' : 'RESULT · ', name, meta, kids, ctxFilter && name === ctxFilter);
+}
+function callCard(b, key, exId) {
+  const name = b.name || '?';
+  if (b.id) displayed.add(b.id);
+  const input = b.input;
+  const kids = [];
+  if (b._open && b._raw !== undefined) {
+    kids.push(h('div', { class: 'isum' }, b._raw || '…'), h('div', { class: 'idesc' }, 'input streaming…'));
+  } else {
+    const s = inputSummary(name, input);
+    if (s != null) kids.push(h('div', { class: 'isum' }, s.length > 400 ? s.slice(0, 400) + ' …' : s));
+    if (isObj(input) && typeof input.description === 'string') kids.push(h('div', { class: 'idesc' }, input.description));
+    if (b._bad) kids.push(h('div', { class: 'warn' }, '⚠ input is not valid JSON; raw text:'), longText(b._raw, key + '/raw', 'mono'));
+    else kids.push(cx(key + '/in', false, [h('span', { class: 'jtitle', style: 'margin:0' }, 'input')], (body) => body.append(jt(input, key + '/in/j'))));
+  }
+  const e = b.id ? S.tools.get(b.id) : null;
+  if (e && e.resultBlock) {
+    const link = e.resultExchangeId != null && e.resultExchangeId !== exId
+      ? h('button', { class: 'lnk', type: 'button', onclick: (ev) => { ev.stopPropagation(); select(e.resultExchangeId, true); } }, 'result in #' + e.resultExchangeId)
+      : h('span', { class: 'idesc' }, 'result in this request');
+    kids.push(h('div', { class: 'attached' }, resultCard(e.resultBlock, name, key + '/res'), link));
+  } else if (b.id) {
+    kids.push(h('div', { class: 'waiting' }, h('span', { class: 'spin' }), 'waiting for result…'));
+  }
+  return card('c-call', '⚙', 'TOOL CALL · ', name, b.id ? b.id : null, kids, ctxFilter && name === ctxFilter);
+}
+function firstLine(s, n) { s = String(s || ''); const i = s.indexOf('\n'); let f = i >= 0 ? s.slice(0, i) : s; if (f.length > (n || 140)) f = f.slice(0, n || 140) + '…'; return f; }
+function renderBlock(b, role, ctx, key) {
+  if (!isObj(b)) return card('c-unk', '?', typeof b, null, null, [jt(b, key)]);
+  switch (b.type) {
+    case 'text': {
+      const t = String(b.text == null ? '' : b.text);
+      if (role === 'system')
+        return foldCard('c-sys', '§', 'SYSTEM (MID-CONVERSATION)', firstLine(t), fmtN(t.length) + ' chars', key, (body) => body.append(longText(t, key + '/t', 'mono', { noClampCopy: true })));
+      if (role === 'assistant')
+        return card('c-model', '◆', 'MODEL', null, b._open ? 'streaming…' : null, [longText(t, key, '')]);
+      if (t.trimStart().startsWith('<system-reminder>'))
+        return foldCard('c-inj', '⋯', 'INJECTED CONTEXT', firstLine(t.replace(/^\s*<system-reminder>\s*/, '')), fmtN(t.length) + ' chars', key, (body) => body.append(longText(t, key + '/t', 'mono', { noClampCopy: true })));
+      return card('c-you', '▶', 'YOU', null, null, [longText(t, key, '')]);
+    }
+    case 'thinking': {
+      const t = b.thinking || '';
+      return card('c-think', '…', 'THINKING', null, b.signature || b._signed ? 'signed' : null,
+        [t ? longText(t, key, '') : h('div', { class: 'ttxt' }, 'hidden (signature only)')]);
+    }
+    case 'redacted_thinking':
+      return card('c-think', '…', 'THINKING', null, 'redacted', [h('div', { class: 'ttxt' }, 'redacted by the API')]);
+    case 'tool_use':
+    case 'server_tool_use':
+      return callCard(b, key, ctx.exId);
+    case 'tool_result': {
+      const e = S.tools.get(b.tool_use_id);
+      const name = (e && e.name) || '?';
+      if (ctx.calls.has(b.tool_use_id))
+        return h('div', { class: 'stub' }, '↳ ' + (b.is_error ? 'error result' : 'result') + ' of ' + name + ', shown with its call');
+      return resultCard(b, name, key);
+    }
+    case 'tool_addition': {
+      const d = (b.tool && (b.tool.definition || b.tool)) || {};
+      return foldCard('c-add', '+', '+ TOOL ADDED: ', String(d.name || '?'), null, key, (body) => body.append(
+        d.description ? longText(d.description, key + '/d', '') : null, h('div', { class: 'jtitle' }, 'definition'), jt(d, key + '/j')));
+    }
+    case 'tool_reference':
+      return h('div', { class: 'loaded' }, '⇪ LOADED TOOL: ' + b.tool_name);
+    default:
+      return card('c-unk', '?', String(b.type || 'unknown'), null, null, [jt(b, key)]);
+  }
+}
+function msgCard(m, idx, ctx, key) {
+  const role = isObj(m) ? String(m.role || '?') : '?';
+  const blocks = isObj(m) ? blocksOf(m.content) : [m];
+  return h('div', { class: 'msg r-' + role },
+    h('div', { class: 'mhead' }, '#' + idx + ' · ', h('span', { class: 'role-' + role }, role)),
+    blocks.map((b, bi) => renderBlock(b, role, ctx, key + '/b' + bi)));
+}
+function callsIn(msgs) {
+  const s = new Set();
+  for (const m of msgs) if (isObj(m) && Array.isArray(m.content)) for (const b of m.content) if (isObj(b) && (b.type === 'tool_use' || b.type === 'server_tool_use') && b.id) s.add(b.id);
+  return s;
+}
+
+// ------------------------------------------------------------------ detail sections (6.3)
+function toolsBadge(ex) {
+  const n = Array.isArray(ex.b && ex.b.tools) ? ex.b.tools.length : 0;
+  const d = ex.toolsDiff;
+  if (!d) return h('span', { class: 'dbadge d-same' }, n + ' tools');
+  if (!d.added.length && !d.removed.length && !d.changed.length) return h('span', { class: 'dbadge d-same' }, 'unchanged (' + n + ')');
+  return h('span', { class: 'dbadge d-chg' },
+    d.added.map((x) => h('span', { class: 'd-add' }, '+' + x + ' ')),
+    d.removed.map((x) => h('span', { class: 'd-del' }, '−' + x + ' ')),
+    d.changed.map((x) => h('span', { class: 'd-mod' }, '~' + x + ' ')));
+}
+function sysBadge(ex) {
+  if (ex.sysChanged == null) return h('span', { class: 'dbadge d-same' }, 'first in thread');
+  return h('span', { class: 'dbadge ' + (ex.sysChanged ? 'd-chg' : 'd-same') }, ex.sysChanged ? 'changed' : 'unchanged');
+}
+function buildSummary(ex) {
+  const r = ex.rp, u = r.usage || {};
+  const st = ex.start ? ex.start.status + ' ' + (ex.start.reason || '') : (ex.end ? 'no response' : 'pending');
+  const total = ex.end ? ex.end.t - ex.req.t : null;
+  const ttfb = ex.start ? ex.start.t - ex.req.t : null;
+  const stream = ex.start && ex.end ? ex.end.t - ex.start.t : null;
+  const ctxSize = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+  const kv = (k, v) => h('span', null, h('span', { class: 'k' }, k + ' '), h('b', null, v));
+  const lines = [
+    h('div', { class: 'line' }, h('b', { style: 'font-size:15px' }, '#' + ex.id), threadChip(ex),
+      h('span', { class: 'chip kind' }, ex.label || 'main'), statusBadge(ex), kv('status', st), kv('model', replyModel(ex) || '–'),
+      kv('stop_reason', r.stop || '–'), h('span', { class: 'k' }, ex.req.method + ' ' + ex.req.path)),
+    h('div', { class: 'line' }, kv('total', fmtDur(total)), kv('time to first byte', fmtDur(ttfb)), kv('stream', fmtDur(stream)),
+      h('span', { class: 'k' }, fmtTime(ex.req.t))),
+    h('div', { class: 'line' }, kv('input', fmtN(u.input_tokens)), kv('cache write', fmtN(u.cache_creation_input_tokens)),
+      kv('cache read', fmtN(u.cache_read_input_tokens)), kv('output', fmtN(u.output_tokens)),
+      u.output_tokens_details && u.output_tokens_details.thinking_tokens != null ? kv('thinking', fmtN(u.output_tokens_details.thinking_tokens)) : null,
+      kv('context', fmtN(ctxSize))),
+  ];
+  if (ex.msgs && ex.prev != null) {
+    lines.push(h('div', { class: 'line' }, h('span', { class: 'k' }, 'vs #' + ex.prev + ':'),
+      h('span', null, h('span', { class: 'k' }, 'System '), sysBadge(ex)),
+      h('span', null, h('span', { class: 'k' }, 'Tools '), toolsBadge(ex)),
+      h('span', null, h('span', { class: 'k' }, 'Params '), ex.paramChanged.length ? h('span', { class: 'dbadge d-chg' }, 'changed: ' + ex.paramChanged.join(', ')) : h('span', { class: 'dbadge d-same' }, 'unchanged'))));
+  }
+  if (ex.histChanged) lines.push(h('div', { class: 'warn' }, '⚠ history changed at message #' + ex.newStart));
+  if (ex.level === 1) lines.push(h('div', { class: 'errbox' }, h('b', null, 'Error: '), ex.errReason));
+  if (ex.level === 2) lines.push(h('div', { class: 'warn' }, '⚠ tool error: ' + ex.toolErrIds.length + ' tool result(s) with is_error in this request (the API call itself succeeded)'));
+  if (r.stop === 'max_tokens') lines.push(h('div', { class: 'warn' }, '⚠ stop_reason is max_tokens: the reply was cut off'));
+  return h('div', { class: 'sumbox' }, lines);
+}
+function buildReply(ex, body) {
+  const r = ex.rp;
+  if (!ex.start && !ex.end) { body.append(h('div', { class: 'waiting', style: 'margin-left:0' }, h('span', { class: 'spin' }), 'waiting for response…')); return; }
+  if (r.error) {
+    const e = r.error;
+    body.append(h('div', { class: 'errbox' }, h('div', null, h('b', null, String(e.type || 'error'))),
+      h('div', null, String(e.message || JSON.stringify(e))),
+      r.requestId ? h('div', { class: 'mono' }, 'request_id: ' + r.requestId) : null));
+  }
+  const blocks = r.blocks.filter(Boolean);
+  if (blocks.length || (r.sse && !r.error)) {
+    const ctx = { calls: new Set(), exId: ex.id };
+    body.append(h('div', { class: 'msg r-assistant' },
+      h('div', { class: 'mhead' }, 'reply · ', h('span', { class: 'role-assistant' }, 'assistant'), r.msgId ? '  ' + r.msgId : '', !ex.end ? '  · streaming…' : ''),
+      blocks.length ? blocks.map((b, i) => renderBlock(b, 'assistant', ctx, 'reply/b' + i)) : h('div', { class: 'idesc' }, 'no content yet')));
+  } else if (r.json != null) body.append(jt(r.json, 'reply/json'));
+  else if (ex.text) body.append(longText(ex.text, 'reply/text', 'mono', { noClampCopy: true }));
+  else if (ex.end) body.append(h('div', { class: 'idesc' }, ex.req.method === 'HEAD' ? '(HEAD reply: no body)' : '(no body)'));
+  for (const w of r.warnings) body.append(h('div', { class: 'warn' }, '⚠ ' + w));
+  if (ex.end && r.sse && !r.complete && !r.error) body.append(h('div', { class: 'errbox' }, h('b', null, 'Stream ended without message_stop'), ' — the reply above is incomplete.'));
+  if (ex.end && ex.end.ok === false && ex.end.error) body.append(h('div', { class: 'errbox' }, h('b', null, 'response_end: '), ex.end.error));
+}
+function replyBadge(ex) {
+  const r = ex.rp;
+  const n = r.blocks.filter(Boolean).length;
+  const bits = [];
+  if (n) bits.push(n + (n === 1 ? ' block' : ' blocks'));
+  if (r.stop) bits.push(r.stop);
+  if (!ex.end && (ex.start || ex.text)) bits.push('streaming');
+  if (r.error) bits.push('error');
+  return h('span', { class: 'pbadge' }, bits.join(' · '));
+}
+function lineDiff(a, b) {
+  const A = a.split('\n'), B = b.split('\n');
+  let p = 0; while (p < A.length && p < B.length && A[p] === B[p]) p++;
+  let s = 0; while (s < A.length - p && s < B.length - p && A[A.length - 1 - s] === B[B.length - 1 - s]) s++;
+  const a2 = A.slice(p, A.length - s), b2 = B.slice(p, B.length - s);
+  let mid = [];
+  if (a2.length * b2.length <= 2e6) {
+    const n = a2.length, m = b2.length;
+    const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) dp[i][j] = a2[i] === b2[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+      if (a2[i] === b2[j]) { mid.push([' ', a2[i]]); i++; j++; }
+      else if (dp[i + 1][j] >= dp[i][j + 1]) mid.push(['-', a2[i++]]);
+      else mid.push(['+', b2[j++]]);
+    }
+    while (i < n) mid.push(['-', a2[i++]]);
+    while (j < m) mid.push(['+', b2[j++]]);
+  } else mid = a2.map((x) => ['-', x]).concat(b2.map((x) => ['+', x]));
+  const rows = [];
+  if (p) rows.push(h('div', { class: 'dl-skip' }, '… ' + p + ' unchanged lines'));
+  for (const [op, line] of mid) rows.push(h('div', { class: op === '+' ? 'dl-add' : op === '-' ? 'dl-del' : '' }, op + ' ' + line));
+  if (s) rows.push(h('div', { class: 'dl-skip' }, '… ' + s + ' unchanged lines'));
+  return h('div', { class: 'diff' }, rows);
+}
+const sysJoined = (b) => sysBlocks(b).map(blockText).join('\n\n-----\n\n');
+function buildSystem(ex, body) {
+  const blocks = sysBlocks(ex.b);
+  if (ex.sysChanged) {
+    const prev = S.ex.get(ex.prev);
+    const holder = h('div');
+    const btn = h('button', { class: 'lnk', type: 'button' }, 'show line diff vs #' + ex.prev);
+    btn.addEventListener('click', () => {
+      if (holder.firstChild) { holder.replaceChildren(); btn.textContent = 'show line diff vs #' + ex.prev; }
+      else { holder.append(lineDiff(prev ? sysJoined(prev.b) : '', sysJoined(ex.b))); btn.textContent = 'hide diff'; }
+    });
+    body.append(h('div', null, btn), holder);
+  }
+  blocks.forEach((blk, i) => {
+    const t = blockText(blk);
+    body.append(h('div', { class: 'sysblk' }, cx('sys/' + i, true, [h('b', null, 'block ' + (i + 1)), h('span', { class: 'pbadge' }, fmtN(t.length) + ' chars'),
+      isObj(blk) && blk.cache_control ? h('span', { class: 'tag cache' }, 'cache') : null,
+      h('span', { class: 'oneline' }, firstLine(t, 90))], (b) => {
+      b.append(h('pre', { class: 'mono' }, t), h('div', { class: 'ltbar' }, copyBtn(t)));
+      if (isObj(blk) && blk.type !== 'text') b.append(jt(blk, 'sys/' + i + '/j'));
+    })));
+  });
+}
+function buildTools(ex, body) {
+  const tools = Array.isArray(ex.b.tools) ? ex.b.tools : [];
+  const d = ex.toolsDiff;
+  if (d && d.removed.length) body.append(h('div', { class: 'warn' }, 'removed since #' + ex.prev + ': ' + d.removed.join(', ')));
+  tools.forEach((t, i) => {
+    const name = toolKey(t);
+    const desc = isObj(t) && typeof t.description === 'string' ? t.description : '';
+    body.append(h('div', { class: 'tline' }, cx('tool/' + i, false, [h('span', { class: 'tname' }, name),
+      isObj(t) && t.defer_loading ? h('span', { class: 'tag' }, 'deferred') : null,
+      d && d.added.includes(name) ? h('span', { class: 'tag new' }, 'added') : null,
+      d && d.changed.includes(name) ? h('span', { class: 'tag mod' }, 'changed') : null,
+      h('span', { class: 'oneline' }, firstLine(desc))], (b) => {
+      if (desc) b.append(longText(desc, 'tool/' + i + '/d', ''));
+      b.append(h('div', { class: 'jtitle' }, 'input_schema'), jt(isObj(t) ? (t.input_schema !== undefined ? t.input_schema : t) : t, 'tool/' + i + '/s'));
+    })));
+  });
+}
+function headerTable(pairs) {
+  if (!pairs || !pairs.length) return h('div', { class: 'idesc' }, '(none)');
+  return h('table', { class: 'hd' }, pairs.map((p) => h('tr', null, h('td', null, String(p[0])), h('td', { class: 'mono' }, String(p[1])))));
+}
+function buildHeaders(ex, body) {
+  body.append(h('div', { class: 'jtitle' }, 'request headers'), headerTable(ex.req.headers),
+    h('div', { class: 'jtitle' }, 'response headers' + (ex.start ? ' (' + ex.start.status + ' ' + (ex.start.reason || '') + ')' : '')),
+    ex.start ? headerTable(ex.start.headers) : h('div', { class: 'idesc' }, '(no response yet)'));
+}
+function buildRaw(ex, body) {
+  body.append(h('div', { class: 'jtitle' }, 'request body'));
+  if (ex.req.body_json != null) body.append(jt(ex.req.body_json, 'raw/req'));
+  else if (ex.req.body) body.append(longText(ex.req.body, 'raw/reqtext', 'mono', { noClampCopy: true }));
+  else body.append(h('div', { class: 'idesc' }, '(empty)'));
+  body.append(h('div', { class: 'jtitle' }, 'response text (' + fmtN(ex.text.length) + ' chars)'));
+  body.append(ex.text ? longText(ex.text, 'raw/res', 'mono', { noClampCopy: true }) : h('div', { class: 'idesc' }, '(empty)'));
+}
+function renderDetail(part) {
+  const pane = $('right');
+  const id = curId();
+  const ex = id != null ? S.ex.get(id) : null;
+  ctxFilter = UI.tool;
+  if (id !== dShown) { dState = new Map(); dShown = id; part = 'all'; pane.scrollTop = 0; }
+  if (!ex) { pane.replaceChildren(h('div', { class: 'empty' }, 'Waiting for traffic… Point an agent at this proxy, or run python3 proxy.py --demo.')); return; }
+  const top = pane.scrollTop;
+  const liveParts = () => {
+    dRefs.summary.replaceChildren(buildSummary(ex));
+    dRefs.reply.replaceChildren(panel('reply', 'Reply', replyBadge(ex), true, (b) => buildReply(ex, b)));
+    dRefs.headers.replaceChildren(panel('headers', 'Headers', h('span', { class: 'pbadge' }, (ex.req.headers || []).length + ' request · ' + (ex.start ? ex.start.headers.length : 0) + ' response'), false, (b) => buildHeaders(ex, b)));
+    dRefs.raw.replaceChildren(panel('raw', 'Raw', h('span', { class: 'pbadge' }, 'request JSON tree · ' + fmtN(ex.text.length) + ' response chars'), false, (b) => buildRaw(ex, b)));
+  };
+  if (part !== 'all' && dRefs.summary) { liveParts(); pane.scrollTop = top; return; }
+  displayed = new Set();
+  dRefs = { summary: h('div'), reply: h('div'), headers: h('div'), raw: h('div') };
+  const secs = [dRefs.summary];
+  const b = ex.b;
+  if (ex.msgs) {
+    const newMsgs = ex.msgs.slice(ex.newStart);
+    secs.push(panel('new', 'New this turn', [h('span', { class: 'pbadge' }, newMsgs.length + (newMsgs.length === 1 ? ' message' : ' messages')),
+      ex.histChanged ? h('span', { class: 'dbadge d-chg' }, '⚠ history changed at message #' + ex.newStart) : null], true, (body) => {
+      const ctx = { calls: callsIn(newMsgs), exId: ex.id };
+      if (!newMsgs.length) body.append(h('div', { class: 'idesc' }, 'no new messages (same conversation as #' + ex.prev + ')'));
+      newMsgs.forEach((m, i) => body.append(msgCard(m, ex.newStart + i, ctx, 'new/m' + (ex.newStart + i))));
+    }));
+  }
+  secs.push(dRefs.reply);
+  if (ex.msgs) {
+    secs.push(panel('conv', 'Conversation (' + ex.msgs.length + ' messages)', null, true, (body) => {
+      const ctx = { calls: callsIn(ex.msgs), exId: ex.id };
+      const k = ex.collapsed;
+      if (k > 0) body.append(cx('conv/earlier', false, [h('span', null, k + (k === 1 ? ' earlier message' : ' earlier messages') + ' (already in #' + ex.prev + ')')], (gb) => {
+        for (let i = 0; i < k; i++) gb.append(msgCard(ex.msgs[i], i, ctx, 'conv/m' + i));
+      }, 'group'));
+      for (let i = k; i < ex.msgs.length; i++) body.append(msgCard(ex.msgs[i], i, ctx, 'conv/m' + i));
+    }));
+  }
+  if (b && b.system !== undefined) {
+    const blocks = sysBlocks(b);
+    const chars = blocks.reduce((n, x) => n + blockText(x).length, 0);
+    secs.push(panel('system', 'System instructions', [h('span', { class: 'pbadge' }, blocks.length + (blocks.length === 1 ? ' block · ' : ' blocks · ') + fmtN(chars) + ' chars'), sysBadge(ex)], false, (body) => buildSystem(ex, body)));
+  }
+  if (b && Array.isArray(b.tools)) secs.push(panel('tools', 'Tools (' + b.tools.length + ')', toolsBadge(ex), false, (body) => buildTools(ex, body)));
+  if (b) {
+    const params = {};
+    for (const k of Object.keys(b)) if (!['messages', 'system', 'tools'].includes(k)) params[k] = b[k];
+    const ch = [...ex.topChanged];
+    secs.push(panel('params', 'Request parameters', ex.prev != null ? h('span', { class: 'dbadge ' + (ch.length ? 'd-chg' : 'd-same') }, ch.length ? 'changed: ' + ch.join(', ') : 'unchanged') : null, false,
+      (body) => body.append(jt(params, 'params', { hl: ex.topChanged }))));
+  }
+  secs.push(dRefs.headers, dRefs.raw);
+  liveParts();
+  pane.replaceChildren(...secs);
+  pane.scrollTop = top;
+}
+
+// ------------------------------------------------------------------ events from the proxy
+function resetAll() {
+  fresh();
+  $('list').replaceChildren(h('div', { class: 'empty' }, 'No traffic yet.'));
+  newCount = 0; updatePill();
+  displayed = new Set(); dShown = undefined; dRefs = {};
+  dirty.rows.clear(); dirty.detail = 'all'; dirty.totals = true; dirty.filterOpts = true;
+  schedule();
+}
+function handle(ev) {
+  switch (ev && ev.type) {
+    case 'reset': resetAll(); break;
+    case 'request': onRequest(ev); break;
+    case 'response_start': onStart(ev); break;
+    case 'response_chunk': onChunk(ev); break;
+    case 'response_end': onEnd(ev); break;
+    default: break;
+  }
+}
+function setLive(live) {
+  $('dot').classList.toggle('live', live);
+  $('conn').classList.toggle('re', !live);
+  $('connText').textContent = live ? 'live' : 'reconnecting…';
+}
+let es = null;
+function connect() {
+  es = new EventSource('/__events');
+  es.onopen = () => setLive(true);
+  es.onerror = () => {
+    setLive(false);
+    if (es.readyState === EventSource.CLOSED) { es.close(); setTimeout(connect, 2000); }
+  };
+  es.onmessage = (e) => {
+    let ev;
+    try { ev = JSON.parse(e.data); } catch (err) { return; }
+    try { handle(ev); } catch (err) { console.error('dashboard: could not handle event', ev && ev.type, err); }
+  };
+}
+
+// ------------------------------------------------------------------ controls
+$('toolSel').addEventListener('change', (e) => { UI.tool = e.target.value; applyFilters(); });
+$('errOnly').addEventListener('change', (e) => { UI.errorsOnly = e.target.checked; applyFilters(); });
+$('hideSide').addEventListener('change', (e) => { UI.hideSide = e.target.checked; applyFilters(); });
+$('follow').addEventListener('change', (e) => {
+  UI.follow = e.target.checked;
+  if (UI.follow) { $('list').scrollTop = 0; newCount = 0; updatePill(); select(S.newestMain, false); }
+});
+$('pill').addEventListener('click', () => { $('list').scrollTo({ top: 0, behavior: 'smooth' }); newCount = 0; updatePill(); });
+$('list').addEventListener('scroll', () => { if ($('list').scrollTop <= 4 && newCount) { newCount = 0; updatePill(); } });
+
+resetAll();
+connect();
+</script>
+</body>
+</html>
