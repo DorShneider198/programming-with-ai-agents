@@ -9,7 +9,9 @@ Each lab lives in its own top-level folder:
 ```
 .
 ├── lab1/   # Lab 1: Drum Timing Trainer
-├── lab2/   # Lab 2 (future)
+├── lab2/   # Lab 2
+├── lab3/   # Lab 3
+├── lab4/   # Lab 4: Spec-Build an Agent Traffic Monitor
 └── ...
 ```
 
